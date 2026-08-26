@@ -1785,6 +1785,12 @@
             return n;
         }
         function n01(x, y, s) { return (hash(x, y, s) % 65536) / 65535; }
+        // Fractional Brownian Motion helper (used by old procedural tile drawers 36..59)
+        function fbm(x, y, s) {
+            return n01(x, y, s) * 0.5 +
+                   n01(x >> 1, y >> 1, s + 17) * 0.3 +
+                   n01(x >> 2, y >> 2, s + 41) * 0.2;
+        }
         function pickCol(arr, x, y, s) { return arr[Math.abs(hash(x, y, s)) % arr.length]; }
         function hexToRgb(hex) {
             const n = parseInt(hex.slice(1), 16);
