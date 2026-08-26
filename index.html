@@ -4346,7 +4346,8 @@
     function createTextureAtlas() {
         const canvas = document.createElement('canvas');
         canvas.width = 128; canvas.height = 512;
-        const ctx = canvas.getContext('2d');
+        const ctx = canvas.getContext && canvas.getContext('2d');
+        if (!ctx) return null;
         ctx.imageSmoothingEnabled = false;
         const img = ctx.createImageData(128, 512);
         const data = img.data;
