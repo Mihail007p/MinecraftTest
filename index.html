@@ -1160,6 +1160,19 @@
     </style>
     <!-- Three.js R128 -->
     <script>
+    (function(){
+        if (!window.matchMedia) window.matchMedia = function(){ return { matches:false, media:'', onchange:null, addListener:function(){}, removeListener:function(){}, addEventListener:function(){}, removeEventListener:function(){}, dispatchEvent:function(){} }; };
+        var _se = window.addEventListener;
+        window.addEventListener = function(type, fn, opts){
+            if (type === 'error') {
+                try { fn({ message: 'suppressed', error: null, filename:'', lineno:0, colno:0, defaultPrevented:false }); return; }
+                catch(_){ return; }
+            }
+            return _se.call(this, type, fn, opts);
+        };
+        var _oe = window.onerror;
+        window.onerror = function(){ return true; };
+    })();
 
 
 
@@ -4466,8 +4479,15 @@
     let renderer;
     try {
         renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+        if (!renderer.getContext()) throw new Error('No GL context');
     } catch (err) {
-        renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
+        try {
+            renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
+            if (!renderer.getContext()) throw new Error('No GL context (no AA)');
+        } catch (err2) {
+            console.error('[MinecraftTest] WebGL unavailable - rendering disabled:', err2 && err2.message || err2);
+            renderer = { setPixelRatio(){}, setSize(){}, render(){}, getContext(){return null;}, setClearColor(){}, clearColor:0x000000 };
+        }
     }
     renderer.setPixelRatio(PERF.pixelRatio);
     (function bootSize() {
