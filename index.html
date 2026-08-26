@@ -2362,6 +2362,27 @@
                 s(x, y, c);
             }
         });
+        // Ore helper: stone base with tinted speckles (used by coal/iron/gold/diamond/etc.)
+        function oreTile(id, color) {
+            return make(function (s) {
+                for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+                    const v = n01(x, y, 11);
+                    let c;
+                    if (v < 0.20) c = '#646464';
+                    else if (v < 0.45) c = '#737373';
+                    else if (v < 0.70) c = '#7d7d7d';
+                    else if (v < 0.88) c = '#8a8a8a';
+                    else c = '#969696';
+                    // vein pattern
+                    const o = n01(x, y, id * 7 + 13);
+                    if (o < 0.18) c = color;
+                    if (o < 0.04) c = '#5a5a5a';
+                    // small dark rim around speckles
+                    if (o > 0.14 && o < 0.20) c = '#5a5a5a';
+                    s(x, y, c);
+                }
+            });
+        }
         MC_TEX.tiles[32] = oreTile(32, '#2a2a2a');
         MC_TEX.tiles[33] = oreTile(33, '#d8c0a0');
         MC_TEX.tiles[34] = oreTile(34, '#f0c040');
