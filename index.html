@@ -2605,7 +2605,7 @@
         const c = document.createElement('canvas');
         c.width = 32; c.height = 32;
         const g = c.getContext('2d');
-        g.imageSmoothingEnabled = false;
+        if (g) g.imageSmoothingEnabled = false;
         function clr() { g.clearRect(0, 0, 32, 32); }
         function save(type) { ITEM_ICON[type] = c.toDataURL('image/png'); }
         function px(x, y, col) {
