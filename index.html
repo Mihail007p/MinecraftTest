@@ -2604,8 +2604,9 @@
     (function bakeItemIcons() {
         const c = document.createElement('canvas');
         c.width = 32; c.height = 32;
-        const g = c.getContext('2d');
-        if (g) g.imageSmoothingEnabled = false;
+        const g = c.getContext && c.getContext('2d');
+        if (!g) { console.warn('Canvas2D unavailable - item icons disabled'); return; }
+        g.imageSmoothingEnabled = false;
         function clr() { g.clearRect(0, 0, 32, 32); }
         function save(type) { ITEM_ICON[type] = c.toDataURL('image/png'); }
         function px(x, y, col) {
