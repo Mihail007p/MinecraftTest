@@ -1784,10 +1784,8 @@
             n = (n ^ (n >>> 13)) >>> 0;
             return n;
         }
-        function n01(x, y, s) { return (hash(x, y, s) % 1024) / 1024; }
-        function fbm(x, y, s) {
-            return n01(x, y, s) * 0.42 + n01(x >> 1, y >> 1, s + 17) * 0.32 + n01(x >> 2, y >> 2, s + 41) * 0.26;
-        }
+        function n01(x, y, s) { return (hash(x, y, s) % 65536) / 65535; }
+        function pickCol(arr, x, y, s) { return arr[Math.abs(hash(x, y, s)) % arr.length]; }
         function hexToRgb(hex) {
             const n = parseInt(hex.slice(1), 16);
             return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
@@ -1807,6 +1805,44 @@
             const A = hexToRgb(hex);
             return rgbToHex(A[0] * k, A[1] * k, A[2] * k);
         }
+        // Notch-CLASSIC палитры (sRGB), в hex — вытащены из oreo/packer-разбора Minecraft Classic 0.30
+        // Используются как discrete-quantization tables — каждая текстура имеет 3-5 тонов своей шкалы
+        const P_GRASS    = ['#4d9e30', '#5fa835', '#56a832', '#6cc24a', '#347420']; // grass top
+        const P_DIRT     = ['#604a30', '#6e5638', '#866043', '#7c5c3e', '#553a1f', '#6a4a2a']; // dirt
+        const P_STONE    = ['#7d7d7d', '#8a8a8a', '#737373', '#646464', '#969696', '#5a5a5a']; // stone texture
+        const P_COBBLE   = ['#5a5a5a', '#6a6a6a', '#787878', '#8a8a8a', '#545454']; // cobblestone
+        const P_BARK     = ['#523c14', '#604a19', '#6e5024', '#7a5c2e', '#86641c', '#4a3414']; // wood log side
+        const P_RING     = ['#604a19', '#7a5c2e', '#8e6c3c', '#523c14', '#9c7c44']; // log top rings
+        const P_PLNK     = ['#a37344', '#b88150', '#9d6a3c', '#c08b58', '#886039', '#7a5028']; // planks
+        const P_LEAF     = ['#2e6e1f', '#3a8029', '#4d9e30', '#347420', '#5fa835', '#1e4a0c']; // leaves
+        const P_SAND     = ['#dcc28c', '#c7b078', '#e8d5a0', '#ccb780', '#b8a06b', '#d2b884']; // sand
+        const P_WATER    = ['#3470c0', '#3a7acc', '#5982bf', '#6694cc', '#2c5fa6', '#4478b6']; // water
+        const P_LAVA     = ['#cf4a14', '#e85a20', '#b43810', '#f07030', '#a42802', '#ec6c28']; // lava
+        const P_GRAVEL   = ['#7d7d7d', '#8a8a8a', '#684a30', '#604a30', '#a89684', '#866043']; // gravel
+        const P_OBSID    = ['#0e0e10', '#1c1a22', '#080810', '#241c2c', '#020205']; // obsidian
+        const P_BEDROCK  = ['#3a3a3a', '#2c2c2c', '#444444', '#262626', '#505050', '#161616']; // bedrock
+        const P_BRICK    = ['#8a3a28', '#9a4030', '#6e2c1c', '#a14a36', '#7a3220']; // red bricks base
+        const P_IRON     = P_STONE; // iron ore: stone + tan specs
+        const P_GOLD     = P_STONE; // gold ore: stone + yellow specs
+        const P_DIAMOND  = P_STONE; // diamond ore: stone + cyan specs
+        const P_REDSTONE = P_STONE; // redstone ore: stone + red specs
+        const P_LAPIS    = P_STONE; // lapis ore: stone + blue specs
+        const P_EMERALD  = P_STONE; // emerald ore: stone + green specs
+        const P_NETHRK   = ['#4a2828', '#5a3030', '#3a2020', '#682c2c', '#724040']; // netherrack
+        const P_SOUL_S   = ['#5a4030', '#483020', '#6a5040', '#503820', '#3a2418', '#7a5e44']; // soul sand
+        const P_QUARTZ   = ['#e8e3d6', '#d4ccbd', '#f4f0e4', '#c8c0b0', '#fff8ec']; // quartz
+        const P_SNOW     = ['#fdfdfd', '#f0f0f0', '#e0e0e0', '#c8c8c8', '#ffffff']; // snow
+        const P_ICE      = ['#7fa4d6', '#a6bcdc', '#5e8bc4', '#cce0ff', '#6c9ad0']; // ice
+        const P_CACTUS   = ['#3a8029', '#4d9e30', '#2e6e1f', '#5fa835', '#347420']; // cactus side = leaves with green
+        const P_CLAY     = ['#a2a2a2', '#b0b0b0', '#8a8a8a', '#9e9e9e', '#c0c0c0']; // clay
+        const P_MUSH_S   = ['#b87a6e', '#a86e62', '#c8826c', '#a26858']; // mushroom stem
+        const P_MUSH_R   = ['#d48a8a', '#a64a48', '#e89898', '#b66a6a', '#c47878']; // mushroom red top
+        const P_MUSH_B   = ['#6e6ec4', '#5050a0', '#8080d8', '#3838a0', '#5a5ab8']; // mushroom brown top
+        const P_PUMPKIN  = ['#c08000', '#dc9020', '#b07000', '#9a6000', '#e8a02c']; // pumpkin
+        const P_TNT      = ['#cc2410', '#9a1c08', '#dc3a14', '#a82008', '#8a1502']; // tnt red
+        const P_BOOK     = ['#866043', '#5a3a20', '#a07346', '#3a2010']; // book
+        const P_FURNACE  = ['#383838', '#5a5a5a', '#202020', '#7c7c7c', '#1c1c1c']; // furnace
+
         function make(fill) {
             const t = new Array(1024);
             function s(x, y, c) {
@@ -1847,298 +1883,485 @@
 
         MC_TEX.tiles[0] = make(function (s) {
             for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
-                const v = fbm(x, y, 11);
-                let c = mixHex('#1e4a0c', '#8fd64a', v);
-                c = mixHex(c, '#3d7319', n01(x, y, 12) * 0.3);
-                if (v > 0.78) c = mixHex(c, '#c8f06a', 0.35);
-                if (v < 0.18) c = mixHex(c, '#5a361c', 0.45);
-                if (n01(x, y, 13) > 0.94) c = '#2a5410';
+                const v = n01(x, y, 11);
+                let c;
+                if (v < 0.18) c = '#347420';
+                else if (v < 0.45) c = '#4d9e30';
+                else if (v < 0.75) c = '#5fa835';
+                else if (v < 0.92) c = '#56a832';
+                else c = '#6cc24a';
+                if (((x * 5 + y * 13) & 31) === 7) c = '#c8e87a';
+                if (((x + y) & 7) === 3 && v > 0.7) c = '#347420';
                 s(x, y, c);
             }
         });
         MC_TEX.tiles[1] = make(function (s) {
-            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) s(x, y, dirtCol(x, y));
+            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+                let c;
+                if (y === 0) {
+                    const v = n01(x, y, 13);
+                    c = (v < 0.5) ? '#5fa835' : '#56a832';
+                    if (((x + y) & 7) === 3 && v > 0.7) c = '#c8e87a';
+                } else if (y === 1 && n01(x, y, 23) > 0.5) {
+                    c = '#5a8c22';
+                } else {
+                    const v = n01(x, y, 31);
+                    if (v < 0.25) c = '#553a1f';
+                    else if (v < 0.55) c = '#604a30';
+                    else if (v < 0.85) c = '#6e5638';
+                    else c = '#7c5c3e';
+                    if (((x * 7 + y * 11) & 63) === 13) c = '#3d2914';
+                }
+                s(x, y, c);
+            }
         });
         MC_TEX.tiles[2] = make(function (s) {
-            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) s(x, y, dirtCol(x, y));
-            for (let x = 0; x < 32; x++) {
-                const h = 6 + (hash(x, 0, 44) % 5);
-                for (let y = 0; y < h; y++) {
-                    const v = fbm(x, y, 11);
-                    s(x, y, mixHex('#2a5410', '#7cc63a', v));
-                }
-                s(x, h, mixHex('#3d7319', '#5a361c', 0.35));
-                if (hash(x, 1, 55) & 1) s(x, h + 1, '#4e8c20');
+            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+                const v = n01(x, y, 21);
+                let c;
+                if (v < 0.30) c = '#553a1f';
+                else if (v < 0.55) c = '#604a30';
+                else if (v < 0.80) c = '#6e5638';
+                else if (v < 0.95) c = '#7c5c3e';
+                else c = '#866043';
+                if (((x + y * 3) & 31) === 7 && n01(x, y, 47) > 0.7) c = '#3d2914';
+                s(x, y, c);
             }
         });
         MC_TEX.tiles[3] = make(function (s) {
-            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) s(x, y, stoneCol(x, y));
-            for (let i = 0; i < 18; i++) {
-                let x = hash(i, 2, 12) % 32, y = hash(i, 4, 13) % 32;
-                const len = 3 + (hash(i, 5, 14) % 6);
-                for (let k = 0; k < len; k++) {
-                    s(x, y, '#2e2e2e');
-                    x = (x + ((hash(i, k, 15) & 1) ? 1 : 0)) & 31;
-                    y = (y + 1) & 31;
-                }
+            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+                const v = n01(x, y, 33);
+                let c;
+                if (v < 0.20) c = '#646464';
+                else if (v < 0.40) c = '#737373';
+                else if (v < 0.65) c = '#7d7d7d';
+                else if (v < 0.85) c = '#8a8a8a';
+                else c = '#969696';
+                if ((((x * 3) ^ (y * 5)) & 31) === 13) c = '#5a5a5a';
+                s(x, y, c);
             }
         });
         MC_TEX.tiles[4] = make(function (s) {
-            for (let x = 0; x < 32; x++) {
-                const band = Math.floor(x / 5);
-                const gx = x % 5;
-                for (let y = 0; y < 32; y++) {
-                    const v = n01(band, y, 70);
-                    let c = mixHex('#1a0e06', '#8a5a30', 0.25 + v * 0.55);
-                    if (gx === 0) c = '#1a0e06';
-                    if (gx === 1) c = mixHex(c, '#4a3018', 0.4);
-                    if (n01(x, y, 71) > 0.92) c = '#c4a06a';
-                    if (n01(x, y, 72) > 0.94) c = '#2a6418';
-                    s(x, y, c);
+            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+                const modX = (x + 4) % 7;
+                const modY = (y + 4) % 7;
+                let c;
+                if (modX === 0 || modY === 0) c = '#545454';
+                else if (modX > 0 && modX < 6 && modY > 0 && modY < 6) c = '#8a8a8a';
+                else {
+                    const v = n01(x, y, 41);
+                    c = (v < 0.5) ? '#6a6a6a' : '#787878';
                 }
+                // grout pixels
+                if (((x + 1) % 7) === 0 && (((y + 1) % 7) === 0)) c = '#5a5a5a';
+                s(x, y, c);
             }
         });
         MC_TEX.tiles[5] = make(function (s) {
             for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
-                const dx = x - 15.5, dy = y - 15.5, r = Math.sqrt(dx * dx + dy * dy);
-                const grain = n01(x, y, 5) * 0.2;
-                let c = mixHex('#c4a06a', '#8a6230', grain + (r % 3) / 8);
-                if (r > 14.6) c = '#3d2814';
-                else if (Math.abs(r - 12) < 0.9) c = '#5a3c18';
-                else if (Math.abs(r - 8.5) < 0.8) c = '#6b4423';
-                else if (Math.abs(r - 5) < 0.7) c = '#8a6230';
-                else if (r < 2.2) c = '#3d2814';
-                else c = mixHex('#e0c088', '#a07838', n01(x, y, 51) * 0.6);
+                const col = x % 6;
+                let c;
+                if (col === 0) c = '#523c14';
+                else if (col === 5) c = '#7a5c2e';
+                else if (col === 1 || col === 4) c = '#604a19';
+                else if (col === 2) c = '#6e5024';
+                else c = '#86641c';
+                // knot
+                if (Math.abs(x - 8) < 2 && Math.abs(y - 17) < 2) c = '#3a2810';
+                if (Math.abs(x - 25) < 2 && Math.abs(y - 7) < 2) c = '#4a3414';
                 s(x, y, c);
             }
         });
         MC_TEX.tiles[6] = make(function (s) {
-            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) s(x, y, plankCol(x, y));
+            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+                const dx = x - 16, dy = y - 16;
+                const d2 = dx * dx + dy * dy;
+                let c;
+                if (d2 > 220) c = '#523c14';
+                else if (d2 > 195) c = '#604a19';
+                else if (d2 > 165) c = '#7a5c2e';
+                else if (d2 > 130) c = '#604a19';
+                else if (d2 > 90) c = '#8e6c3c';
+                else if (d2 > 50) c = '#604a19';
+                else c = '#9c7c44';
+                s(x, y, c);
+            }
         });
         MC_TEX.tiles[7] = make(function (s) {
             for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
-                const v = fbm(x, y, 77);
-                if (n01(x, y, 78) > 0.88) s(x, y, '#0a1806');
-                else s(x, y, mixHex('#14380c', '#6ad040', v));
+                const strip = Math.floor(y / 8);
+                const inStrip = y % 8;
+                let c;
+                if (inStrip === 0) c = '#7a5028';
+                else if (inStrip === 1) c = '#9d6a3c';
+                else if (inStrip === 7) c = '#a37344';
+                else if (inStrip === 6) c = '#b88150';
+                else c = '#a37344';
+                // vertical seams (across strips)
+                if (strip === 0 && x === 12) c = '#5a3a1c';
+                if (strip === 3 && x === 8) c = '#5a3a1c';
+                if (strip === 3 && x === 22) c = '#5a3a1c';
+                // some planks darker
+                const seed = n01(strip, 0, 99);
+                if (seed > 0.66 && inStrip > 1 && inStrip < 6) {
+                    c = (strip % 2 === 0) ? '#c08b58' : '#886039';
+                }
+                s(x, y, c);
             }
         });
         MC_TEX.tiles[8] = make(function (s) {
             for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
-                const v = fbm(x, y, 88);
-                let c = mixHex('#c2b373', '#f5ecd0', v);
-                if (n01(x, y, 89) > 0.93) c = '#a89860';
-                if (n01(x, y, 90) > 0.97) c = '#8a7a48';
+                const v = n01(x, y, 81);
+                const v2 = n01(x, y, 89);
+                let c;
+                if (v < 0.20) c = '#2e6e1f';
+                else if (v < 0.45) c = '#3a8029';
+                else if (v < 0.70) c = '#4d9e30';
+                else if (v < 0.88) c = '#5fa835';
+                else c = '#347420';
+                if (v2 < 0.07) c = '#1e4a0c';
+                if (((x + y * 3) & 15) === 4) c = '#2e6e1f';
                 s(x, y, c);
             }
         });
         MC_TEX.tiles[9] = make(function (s) {
-            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) s(x, y, '#4a1814');
-            for (let y = 6; y < 26; y++) for (let x = 4; x < 28; x++) {
-                const v = fbm(x, y, 9);
-                s(x, y, mixHex('#a03028', '#f09890', v));
+            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+                const v = n01(x, y, 51);
+                let c;
+                if (v < 0.20) c = '#b8a06b';
+                else if (v < 0.55) c = '#dcc28c';
+                else if (v < 0.85) c = '#e8d5a0';
+                else c = '#c7b078';
+                if ((((x * 3) ^ (y * 7)) & 63) === 17) c = '#a8916b';
+                s(x, y, c);
             }
-            for (let x = 6; x < 18; x++) for (let y = 8; y < 12; y++) s(x, y, mixHex('#f0c0b8', '#fff0e8', n01(x, y, 91)));
-            for (let x = 8; x < 22; x++) s(x, 20, '#7a2820');
         });
         MC_TEX.tiles[10] = make(function (s) {
             for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
-                const v = fbm(x, y, 10);
-                const knit = ((x >> 2) + (y >> 2)) & 1;
-                let c = mixHex('#d0d0d0', '#ffffff', v);
-                if (knit) c = mixHex(c, '#c4c4c4', 0.4);
-                if (y % 8 === 0) c = mixHex(c, '#b0b0b0', 0.5);
+                const wave = (Math.sin((x + y) * 0.3) + 1) * 0.5;
+                let c;
+                if (wave < 0.3) c = '#2c5fa6';
+                else if (wave < 0.6) c = '#3470c0';
+                else if (wave < 0.8) c = '#3a7acc';
+                else c = '#5982bf';
+                if (y < 2 && n01(x, y, 99) > 0.5) c = '#6694cc';
                 s(x, y, c);
             }
         });
         MC_TEX.tiles[11] = make(function (s) {
             for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
-                const w = Math.sin((x * 0.45) + Math.sin(y * 0.35) * 2.2);
-                const c1 = w > 0 ? 'rgba(40, 105, 210, 0.55)' : 'rgba(22, 70, 170, 0.52)';
-                s(x, y, c1);
-            }
-            for (let y = 4; y < 32; y += 5) {
-                const ox = (y % 10 === 4) ? 0 : 3;
-                for (let x = ox; x < 32; x += 6) s(x, y, 'rgba(150, 210, 255, 0.42)');
+                const v = n01(x, y, 61);
+                const v2 = n01(x, y, 67);
+                let c;
+                if (v < 0.18) c = '#a42802';
+                else if (v < 0.45) c = '#cf4a14';
+                else if (v < 0.75) c = '#e85a20';
+                else c = '#f07030';
+                if (v2 < 0.07) c = '#b43810';
+                s(x, y, c);
             }
         });
         MC_TEX.tiles[12] = make(function (s) {
-            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) s(x, y, mixHex('#bba57a', '#d4c4a0', n01(x, y, 12)));
-            for (let y = 4; y < 28; y++) { s(15, y, '#8a6230'); s(16, y, '#c4a06a'); }
-            for (let i = 0; i < 16; i++) {
-                s(14 - (i >> 2), 6 + i, '#fff8ee');
-                s(17 + (i >> 2), 7 + i, '#f5ead4');
-                s(12 - (i >> 2), 8 + i, '#efe0c4');
-                s(19 + (i >> 2), 9 + i, '#fff8ee');
+            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+                const v = n01(x, y, 71);
+                let c;
+                if (v < 0.18) c = '#7d7d7d';
+                else if (v < 0.55) c = '#8a8a8a';
+                else if (v < 0.78) c = '#a89684';
+                else if (v < 0.92) c = '#684a30';
+                else c = '#604a30';
+                if ((x % 5) < 3 && (y % 5) < 3 && n01(x, y, 83) > 0.65) c = '#5a5a5a';
+                s(x, y, c);
             }
-            s(14, 27, '#d4a017'); s(15, 27, '#d4a017'); s(16, 27, '#c49210');
         });
         MC_TEX.tiles[13] = make(function (s) {
-            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) s(x, y, '#3a2410');
-            for (let i = 0; i < 22; i++) {
-                s(5 + i, 24 - i, '#8a6230');
-                s(6 + i, 24 - i, '#c4a06a');
-                s(5 + i, 25 - i, '#5a3c18');
+            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+                const v = n01(x, y, 91);
+                let c;
+                if (v < 0.30) c = '#020205';
+                else if (v < 0.65) c = '#0e0e10';
+                else if (v < 0.88) c = '#1c1a22';
+                else c = '#241c2c';
+                if (((x + y) & 15) === 5) c = '#020205';
+                s(x, y, c);
             }
         });
         MC_TEX.tiles[14] = make(function (s) {
-            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) s(x, y, plankCol(x, y));
-            for (let y = 2; y < 14; y++) for (let x = 2; x < 30; x++) s(x, y, mixHex('#a07838', '#c4a06a', n01(x, y, 14)));
-            s(5, 5, '#5a3c18'); s(6, 5, '#5a3c18'); s(14, 5, '#5a3c18'); s(15, 5, '#5a3c18');
-            s(22, 6, '#4a3018'); s(23, 6, '#4a3018');
-            for (let y = 16; y < 32; y++) { s(6, y, '#6e542d'); s(25, y, '#6e542d'); }
-            for (let x = 10; x < 22; x++) for (let y = 18; y < 28; y++) s(x, y, '#5a4224');
+            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+                const v = n01(x, y, 101);
+                let c;
+                if (v < 0.20) c = '#262626';
+                else if (v < 0.50) c = '#3a3a3a';
+                else if (v < 0.78) c = '#444444';
+                else if (v < 0.92) c = '#2c2c2c';
+                else c = '#505050';
+                s(x, y, c);
+            }
         });
         MC_TEX.tiles[15] = make(function (s) {
-            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) s(x, y, mixHex('#2a1c10', '#4a3018', n01(x, y, 15)));
-            for (let i = 0; i < 16; i++) {
-                s(10 + i, 24 - i, '#8a6230');
-                s(11 + i, 24 - i, '#c4a06a');
-            }
-            for (let x = 8; x < 30; x++) {
-                s(x, 6, '#8a8a8a'); s(x, 7, '#d0d0d0'); s(x, 8, '#a0a0a0'); s(x, 9, '#707070');
+            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+                const strip = Math.floor(y / 8);
+                const inY = y % 8;
+                const offsetX = (strip % 2 === 0) ? 0 : 8;
+                const lodgetX = ((x + offsetX) % 16);
+                let c;
+                if (inY >= 0 && inY <= 1) {
+                    // top mortar row
+                    if (lodgetX === 0 || lodgetX === 15) c = '#aaaaaa';
+                    else c = '#6e2c1c';
+                } else if (inY >= 2 && inY <= 5) {
+                    // brick body
+                    if (lodgetX === 0 || lodgetX === 15 || lodgetX === 7 || lodgetX === 8) {
+                        c = '#6e2c1c';
+                    } else {
+                        const v = n01(x, y, 121);
+                        if (v < 0.30) c = '#7a3220';
+                        else if (v < 0.70) c = '#8a3a28';
+                        else c = '#9a4030';
+                    }
+                } else {
+                    // bottom mortar
+                    if (lodgetX === 7 || lodgetX === 8) c = '#6e2c1c';
+                    else c = '#7a3220';
+                }
+                if (inY > 1 && inY < 6 && lodgetX > 1 && lodgetX < 14 && n01(x, y, 131) > 0.93) c = '#a14a36';
+                s(x, y, c);
             }
         });
         MC_TEX.tiles[16] = make(function (s) {
-            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) s(x, y, '#1a120a');
-            for (let y = 16; y < 32; y++) { s(15, y, '#8a6230'); s(16, y, '#c4a06a'); }
-            const flame = ['#fff8c0', '#ffe680', '#ffcc33', '#ffaa00', '#ff7722'];
-            for (let y = 4; y < 17; y++) for (let x = 12; x < 20; x++) {
-                const dx = x - 15.5, dy = y - 10;
-                if (dx * dx + dy * dy * 0.7 < 18) s(x, y, flame[Math.min(4, Math.abs(dy / 2) | 0)]);
+            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+                // base stone
+                const v = n01(x, y, 33);
+                let c;
+                if (v < 0.20) c = '#646464';
+                else if (v < 0.40) c = '#737373';
+                else if (v < 0.65) c = '#7d7d7d';
+                else if (v < 0.85) c = '#8a8a8a';
+                else c = '#969696';
+                // ore accent — irregular blobs
+                const o = n01(x, y, 216);
+                if (o < 0.18) c = '#c4a888';
+                if (o < 0.05) c = '#5a5a5a';
+                s(x, y, c);
             }
-            s(15, 5, '#ffffff'); s(16, 6, '#fff8c0');
         });
         MC_TEX.tiles[17] = make(function (s) {
             for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
-                const edge = y < 2 || y > 29 || x < 2 || x > 29;
-                s(x, y, edge ? '#3d2814' : mixHex('#8a6230', '#d4b888', n01(x, y, 17)));
+                // base stone
+                const v = n01(x, y, 33);
+                let c;
+                if (v < 0.20) c = '#646464';
+                else if (v < 0.40) c = '#737373';
+                else if (v < 0.65) c = '#7d7d7d';
+                else if (v < 0.85) c = '#8a8a8a';
+                else c = '#969696';
+                // ore accent — irregular blobs
+                const o = n01(x, y, 217);
+                if (o < 0.18) c = '#f0c040';
+                if (o < 0.05) c = '#5a5a5a';
+                s(x, y, c);
             }
-            for (let x = 0; x < 32; x++) { s(x, 13, '#5a3c18'); s(x, 14, '#2a1a0c'); s(x, 15, '#5a3c18'); }
-            s(14, 14, '#d4a017'); s(15, 14, '#f0c040'); s(16, 14, '#d4a017'); s(17, 14, '#b8860b');
-            s(15, 15, '#8a6230'); s(16, 15, '#8a6230');
         });
         MC_TEX.tiles[18] = make(function (s) {
-            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) s(x, y, stoneCol(x, y));
-            for (let y = 10; y < 30; y++) for (let x = 6; x < 26; x++) s(x, y, '#121212');
-            for (let y = 16; y < 28; y++) for (let x = 10; x < 22; x++) {
-                s(x, y, mixHex('#cc4400', '#ffe680', n01(x, y, 18)));
+            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+                // base stone
+                const v = n01(x, y, 33);
+                let c;
+                if (v < 0.20) c = '#646464';
+                else if (v < 0.40) c = '#737373';
+                else if (v < 0.65) c = '#7d7d7d';
+                else if (v < 0.85) c = '#8a8a8a';
+                else c = '#969696';
+                // ore accent — irregular blobs
+                const o = n01(x, y, 218);
+                if (o < 0.18) c = '#5ee7ff';
+                if (o < 0.05) c = '#5a5a5a';
+                s(x, y, c);
             }
-            s(14, 18, '#fff8c0'); s(15, 19, '#ffffff');
         });
         MC_TEX.tiles[19] = make(function (s) {
-            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) s(x, y, stoneCol(x + 4, y));
-            for (let y = 8; y < 14; y++) for (let x = 8; x < 24; x++) s(x, y, '#2a2a2a');
-            for (let y = 20; y < 26; y++) for (let x = 8; x < 24; x++) s(x, y, '#1a1a1a');
+            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+                // base stone
+                const v = n01(x, y, 33);
+                let c;
+                if (v < 0.20) c = '#646464';
+                else if (v < 0.40) c = '#737373';
+                else if (v < 0.65) c = '#7d7d7d';
+                else if (v < 0.85) c = '#8a8a8a';
+                else c = '#969696';
+                // ore accent — irregular blobs
+                const o = n01(x, y, 219);
+                if (o < 0.18) c = '#cc2410';
+                if (o < 0.05) c = '#5a5a5a';
+                s(x, y, c);
+            }
         });
         MC_TEX.tiles[20] = make(function (s) {
             for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
-                let c = mixHex('#c2b373', '#efe4b0', fbm(x, y, 20));
-                if (x === 15 || y === 15) c = '#b8a868';
+                // base stone
+                const v = n01(x, y, 33);
+                let c;
+                if (v < 0.20) c = '#646464';
+                else if (v < 0.40) c = '#737373';
+                else if (v < 0.65) c = '#7d7d7d';
+                else if (v < 0.85) c = '#8a8a8a';
+                else c = '#969696';
+                // ore accent — irregular blobs
+                const o = n01(x, y, 220);
+                if (o < 0.18) c = '#3a5fb8';
+                if (o < 0.05) c = '#5a5a5a';
                 s(x, y, c);
             }
         });
         MC_TEX.tiles[21] = make(function (s) {
             for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
-                const edge = x < 2 || y < 2 || x > 29 || y > 29;
-                const v = fbm(x, y, 21);
-                s(x, y, edge ? '#6aa8b8' : mixHex('#9fd0dc', '#f2fcff', v));
+                // base stone
+                const v = n01(x, y, 33);
+                let c;
+                if (v < 0.20) c = '#646464';
+                else if (v < 0.40) c = '#737373';
+                else if (v < 0.65) c = '#7d7d7d';
+                else if (v < 0.85) c = '#8a8a8a';
+                else c = '#969696';
+                // ore accent — irregular blobs
+                const o = n01(x, y, 221);
+                if (o < 0.18) c = '#3ad64a';
+                if (o < 0.05) c = '#5a5a5a';
+                s(x, y, c);
             }
-            for (let y = 4; y < 14; y++) for (let x = 4; x < 16; x++) s(x, y, mixHex('#f0fbff', '#ffffff', 0.4));
-            for (let y = 18; y < 28; y++) for (let x = 18; x < 28; x++) s(x, y, '#6aa8b8');
         });
         MC_TEX.tiles[22] = make(function (s) {
             for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
-                let c = plankCol(x, y);
-                if (x < 3 || x > 28 || y < 2 || y > 29) c = '#3a2410';
-                if (x === 10 || x === 11 || x === 21 || x === 22) c = '#4a3018';
-                if (y === 15 || y === 16) c = '#2a1a0c';
+                const v = n01(x, y, 191);
+                const v2 = n01(x, y, 197);
+                let c;
+                if (v < 0.20) c = '#3a2020';
+                else if (v < 0.55) c = '#4a2828';
+                else if (v < 0.80) c = '#5a3030';
+                else if (v < 0.95) c = '#682c2c';
+                else c = '#724040';
+                if (v2 < 0.08) c = '#2a1414';
                 s(x, y, c);
             }
-            for (let y = 12; y <= 19; y++) for (let x = 23; x <= 27; x++) s(x, y, '#c4a040');
-            s(24, 15, '#5a3a10'); s(25, 15, '#3a2808');
-            s(24, 16, '#f0d060'); s(25, 16, '#c4a040');
         });
         MC_TEX.tiles[23] = make(function (s) {
-            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) s(x, y, '#2a1a0c');
-            for (let y = 0; y < 32; y++) {
-                s(4, y, '#8a6230'); s(5, y, '#c4a06a'); s(6, y, '#6b4423');
-                s(25, y, '#6b4423'); s(26, y, '#c4a06a'); s(27, y, '#8a6230');
-            }
-            for (let k = 0; k < 5; k++) {
-                const y = 3 + k * 6;
-                for (let x = 4; x < 28; x++) { s(x, y, '#c4a06a'); s(x, y + 1, '#8a6230'); }
+            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+                const v = n01(x, y, 211);
+                let c;
+                if (v < 0.20) c = '#3a2418';
+                else if (v < 0.45) c = '#483020';
+                else if (v < 0.70) c = '#503820';
+                else if (v < 0.88) c = '#5a4030';
+                else c = '#6a5040';
+                // soul beads
+                if (((x * 11 + y * 7) & 31) === 13) c = '#7a5e44';
+                s(x, y, c);
             }
         });
         MC_TEX.tiles[24] = make(function (s) {
-            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) s(x, y, plankCol(x, y));
+            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+                const v = n01(x, y, 223);
+                let c;
+                if (v < 0.25) c = '#c8c0b0';
+                else if (v < 0.55) c = '#d4ccbd';
+                else if (v < 0.80) c = '#e8e3d6';
+                else if (v < 0.95) c = '#f4f0e4';
+                else c = '#fff8ec';
+                if (((x + y) & 7) === 3) c = '#c8c0b0';
+                s(x, y, c);
+            }
         });
         MC_TEX.tiles[25] = make(function (s) {
-            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) s(x, y, '#5a3c18');
-            for (let y = 8; y < 20; y++) for (let x = 0; x < 32; x++) {
-                s(x, y, mixHex('#8a2020', '#f08080', fbm(x, y, 25)));
+            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+                const v = n01(x, y, 241);
+                let c;
+                if (v < 0.30) c = '#c8c8c8';
+                else if (v < 0.55) c = '#e0e0e0';
+                else if (v < 0.80) c = '#f0f0f0';
+                else c = '#fdfdfd';
+                s(x, y, c);
             }
-            for (let y = 20; y < 28; y++) for (let x = 0; x < 32; x++) s(x, y, plankCol(x, y));
-            for (let y = 28; y < 32; y++) { s(1, y, '#6b4423'); s(2, y, '#8a6230'); s(29, y, '#8a6230'); s(30, y, '#6b4423'); }
-            for (let x = 2; x < 12; x++) s(x, 10, '#f09890');
         });
         MC_TEX.tiles[26] = make(function (s) {
-            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) s(x, y, plankCol(x, y));
-            s(15, 16, '#5a4224'); s(16, 16, '#3d2814');
+            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+                const v = n01(x, y, 251);
+                let c;
+                if (v < 0.25) c = '#5e8bc4';
+                else if (v < 0.55) c = '#7fa4d6';
+                else if (v < 0.85) c = '#a6bcdc';
+                else c = '#cce0ff';
+                if (((x + y * 3) & 15) === 4) c = '#6c9ad0';
+                s(x, y, c);
+            }
         });
         MC_TEX.tiles[27] = make(function (s) {
-            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) s(x, y, stoneCol(x, y));
-            for (let x = 0; x < 32; x++) { s(x, 15, '#3a3a3a'); s(x, 31, '#3a3a3a'); }
-            for (let y = 0; y < 16; y++) s(15, y, '#3a3a3a');
-            for (let y = 16; y < 32; y++) { s(7, y, '#3a3a3a'); s(23, y, '#3a3a3a'); }
+            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+                let c;
+                const v = n01(x, y, 257);
+                if (v < 0.30) c = '#3a8029';
+                else if (v < 0.65) c = '#4d9e30';
+                else if (v < 0.88) c = '#5fa835';
+                else c = '#347420';
+                if (((x + y * 5) & 31) === 7) c = '#2e6e1f';
+                s(x, y, c);
+            }
         });
         MC_TEX.tiles[28] = make(function (s) {
             for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
-                const edge = x < 2 || y < 2 || x > 29 || y > 29;
-                const inner = x < 4 || y < 4 || x > 27 || y > 27;
-                if (edge) s(x, y, '#7a7a7a');
-                else if (inner) s(x, y, '#c8c8c8');
-                else s(x, y, mixHex('#d0d0d0', '#ececec', fbm(x, y, 28)));
+                const v = n01(x, y, 263);
+                let c;
+                if (v < 0.20) c = '#8a8a8a';
+                else if (v < 0.45) c = '#9e9e9e';
+                else if (v < 0.75) c = '#a2a2a2';
+                else if (v < 0.95) c = '#b0b0b0';
+                else c = '#c0c0c0';
+                s(x, y, c);
             }
         });
         MC_TEX.tiles[29] = make(function (s) {
-            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) s(x, y, '#1a120a');
-            for (let x = 2; x < 30; x++) { s(x, 26, '#6b4423'); s(x, 27, '#4a3018'); s(x, 28, '#2a1a0c'); }
-            for (let y = 8; y < 26; y++) for (let x = 10; x < 22; x++) {
-                const dx = x - 16, dy = y - 16;
-                if (dx * dx + dy * dy * 0.6 < 50) s(x, y, mixHex('#cc4400', '#ffe680', n01(x, y, 29)));
+            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+                const v = n01(x, y, 271);
+                let c;
+                if (v < 0.20) c = '#9a6000';
+                else if (v < 0.45) c = '#b07000';
+                else if (v < 0.75) c = '#c08000';
+                else if (v < 0.92) c = '#dc9020';
+                else c = '#e8a02c';
+                // vertical ridges
+                if (x % 3 === 0) c = '#9a6000';
+                s(x, y, c);
             }
-            s(15, 8, '#ffffff'); s(16, 9, '#fff8c0');
         });
         MC_TEX.tiles[30] = make(function (s) {
             for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
-                const edge = x < 3 || x > 28;
-                s(x, y, edge ? '#4a3018' : mixHex('#5a3c18', '#8a6230', n01(x, y, 30)));
+                const strip = Math.floor(y / 8);
+                const inStrip = y % 8;
+                let c;
+                if (inStrip === 0) c = '#3a2010';
+                else if (inStrip === 1) c = '#5a3a20';
+                else if (inStrip === 7) c = '#a07346';
+                else if (inStrip === 6) c = '#866043';
+                else c = '#a07346';
+                // vertical grain
+                if (((x + 7) % 12) === 0) c = '#3a2010';
+                s(x, y, c);
             }
-            for (let x = 0; x < 32; x++) {
-                s(x, 0, '#c4a06a'); s(x, 1, '#8a6230');
-                s(x, 30, '#8a6230'); s(x, 31, '#4a3018');
-            }
-            for (let x = 10; x < 22; x++) for (let y = 12; y < 22; y++) s(x, y, '#3d2814');
         });
         MC_TEX.tiles[31] = make(function (s) {
-            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) s(x, y, stoneCol(x, y));
-            for (let y = 0; y < 12; y++) for (let x = 0; x < 32; x++) s(x, y, mixHex('#4a3018', '#8a6230', n01(x, y, 31)));
-            for (let y = 14; y < 30; y++) for (let x = 8; x < 24; x++) s(x, y, '#121212');
-            for (let y = 20; y < 28; y++) for (let x = 12; x < 20; x++) s(x, y, '#ff7722');
+            for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+                const v = n01(x, y, 281);
+                let c;
+                if (v < 0.20) c = '#202020';
+                else if (v < 0.50) c = '#2e2e2e';
+                else if (v < 0.80) c = '#383838';
+                else if (v < 0.95) c = '#5a5a5a';
+                else c = '#7c7c7c';
+                // rivets (corners)
+                if (((x === 2 || x === 27) && (y < 4 || y > 27)) ||
+                    ((y === 2 || y === 27) && (x < 4 || x > 27))) c = '#aaaaaa';
+                s(x, y, c);
+            }
         });
-
-        function oreTile(speckle, glow) {
-            return make(function (s) {
-                for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
-                    let c = stoneCol(x, y);
-                    const v = n01(x, y, speckle + 3);
-                    if (v > 0.78) c = glow;
-                    else if (v > 0.70) c = mixHex(c, glow, 0.55);
-                    if (n01(x, y, speckle + 9) > 0.93) c = mixHex(glow, '#ffffff', 0.35);
-                    s(x, y, c);
-                }
-            });
-        }
         MC_TEX.tiles[32] = oreTile(32, '#2a2a2a');
         MC_TEX.tiles[33] = oreTile(33, '#d8c0a0');
         MC_TEX.tiles[34] = oreTile(34, '#f0c040');
