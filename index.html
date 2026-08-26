@@ -3794,9 +3794,30 @@ function mc_darken(hex, k) {
         return { w: w, h: h };
     }
     const IS_TOUCH_PHONE = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
-    const PERF = {
-        // Tecno Pova Neo 3 8 ГБ тянет картинку лучше, чем самый слабый режим.
-        // Оптимизируем логикой и частотой обновлений, а не сильным замыливанием.
+    // Low-end detector for Tecno Pova Neo 3 / Redmi 10 / similar entry-level Android.
+    const _hr = (typeof navigator !== 'undefined') ? (navigator.hardwareConcurrency || 2) : 2;
+    const _dm = (typeof navigator !== 'undefined') ? (navigator.deviceMemory || 4) : 4;
+    const _ua = ((typeof navigator !== 'undefined' ? navigator.userAgent : '') || '').toLowerCase();
+    const _isLowUa = _ua.indexOf('pova neo 3') >= 0 || _ua.indexOf('redmi 10') >= 0 ||
+                      _ua.indexOf('infinix') >= 0 || _ua.indexOf('tecno') >= 0 ||
+                      _ua.indexOf('itel ') >= 0;
+    const IS_LOW_END = (_hr <= 4) || (_dm <= 4) || _isLowUa;
+    const PERF = IS_LOW_END ?
+        {
+            // Pova Neo 3 / Redmi 10 / etc. Mali-G52, <=4GB RAM, 4 cores.
+            // Aggressive downscale and minimal background activity to avoid OOM.
+            pixelRatio: 0.55,
+            minPixelRatio: 0.45,
+            maxPixelRatio: 0.70,
+            speechEvery: 0.05,
+            socialEvery: 0.10,
+            mobCap: 2,
+            mobHardCap: 3,
+            farLimit: 32,
+            burst: 2,
+            torchAcc: 0.10,
+        } :
+        {
         pixelRatio: Math.min(window.devicePixelRatio || 1, IS_TOUCH_PHONE ? 1.02 : 1.25),
         minPixelRatio: 0.90,
         maxPixelRatio: Math.min(window.devicePixelRatio || 1, IS_TOUCH_PHONE ? 1.08 : 1.25),
@@ -3808,9 +3829,22 @@ function mc_darken(hex, k) {
     };
     let renderer;
     try {
-        renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+        renderer = new THREE.WebGLRenderer({
+            canvas,
+            antialias: !IS_LOW_END,
+            powerPreference: IS_LOW_END ? 'low-power' : 'high-performance',
+            failIfMajorPerformanceCaveat: false,
+            precision: IS_LOW_END ? 'lowp' : 'mediump',
+            depth: IS_LOW_END ? false : true
+        });
     } catch (err) {
-        renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
+        try {
+            renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
+        } catch (err2) {
+            console.warn('[MCTest] WebGL fallback enabled (CPU renderer)');
+            renderer = { setPixelRatio(){}, setSize(){}, render(){}, getContext(){return null;},
+                          setClearColor(){}, clearColor:0x000000, domElement:canvas };
+        }
     }
     renderer.setPixelRatio(PERF.pixelRatio);
     (function bootSize() {
