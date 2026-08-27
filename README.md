@@ -8,9 +8,9 @@
 
 https://raw.githack.com/Mihail007p/MinecraftTest/arena/01a0432c-minecrafttest/index.html
 
-Фиксированная версия (коммит `5a5c6b3`, кэш CDN, грузится быстрее):
+Фиксированная версия (коммит `15cac41`, кэш CDN, грузится быстрее):
 
-https://rawcdn.githack.com/Mihail007p/MinecraftTest/5a5c6b3e457d484178af2a7eb21a30a08ecb37e3/index.html
+https://rawcdn.githack.com/Mihail007p/MinecraftTest/15cac413dac2508aac3124c7e34ac5322d617b45/index.html
 
 Ветка `main`:
 
