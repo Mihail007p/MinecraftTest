@@ -1760,11 +1760,19 @@
     function isFenceBlock(type) {
         return type === BLOCK_FENCE || type === BLOCK_GATE || type === BLOCK_GATE_OPEN;
     }
-    function isOpaque(type) {
+    const MAX_BLOCK_TYPE = 102;
+    // Таблицы вместо цепочек if: isOpaque/getBlockFaceTile зовутся сотни тысяч
+    // раз при сборке чанка — на Pova Neo 3 это были основные тормоза.
+    var OPAQUE_LUT = null;
+    function isOpaqueCompute(type) {
         return type !== BLOCK_EMPTY && type !== BLOCK_WATER && type !== ITEM_WOOL &&
             type !== BLOCK_DOOR_OPEN && type !== BLOCK_GLASS && type !== BLOCK_TORCH &&
             type !== BLOCK_BED && !isFenceBlock(type) &&
             !isNonBlockItem(type);
+    }
+    function isOpaque(type) {
+        if (OPAQUE_LUT && type >= 0 && type <= MAX_BLOCK_TYPE) return OPAQUE_LUT[type] === 1;
+        return isOpaqueCompute(type);
     }
     function isDoorNeighbor(type) {
         return isOpaque(type) || type === BLOCK_GLASS || type === BLOCK_DOOR || type === BLOCK_DOOR_OPEN;
@@ -1801,15 +1809,21 @@
         return ((h & 1) ? -u : u) + ((h & 2) ? -2.0 * v : 2.0 * v);
     }
     function perlin2D(x, y) {
-        const X = Math.floor(x) & 255, Y = Math.floor(y) & 255;
-        const xf = x - Math.floor(x), yf = y - Math.floor(y);
-        const u = fade(xf), v = fade(yf);
-        const aa = PERM[PERM[X] + Y], ab = PERM[PERM[X] + Y + 1];
-        const ba = PERM[PERM[X + 1] + Y], bb = PERM[PERM[X + 1] + Y + 1];
-        return lerp(v,
-            lerp(u, grad2D(aa, xf, yf), grad2D(ba, xf - 1, yf)),
-            lerp(u, grad2D(ab, xf, yf - 1), grad2D(bb, xf - 1, yf - 1))
-        );
+        // Тот же самый шум, но без повторных Math.floor и вызовов fade/lerp —
+        // генерация ландшафта была самой горячей функцией профиля.
+        const fx = Math.floor(x), fy = Math.floor(y);
+        const X = fx & 255, Y = fy & 255;
+        const xf = x - fx, yf = y - fy;
+        const u = xf * xf * xf * (xf * (xf * 6 - 15) + 10);
+        const v = yf * yf * yf * (yf * (yf * 6 - 15) + 10);
+        const pX = PERM[X], pX1 = PERM[X + 1];
+        const aa = PERM[pX + Y], ab = PERM[pX + Y + 1];
+        const ba = PERM[pX1 + Y], bb = PERM[pX1 + Y + 1];
+        const g1 = grad2D(aa, xf, yf), g2 = grad2D(ba, xf - 1, yf);
+        const g3 = grad2D(ab, xf, yf - 1), g4 = grad2D(bb, xf - 1, yf - 1);
+        const a = g1 + u * (g2 - g1);
+        const b = g3 + u * (g4 - g3);
+        return a + v * (b - a);
     }
     function fbm(x, y) {
         let total = 0, amp = 1, freq = 1, maxAmp = 0;
@@ -4039,13 +4053,32 @@
         return texture;
     }
 
-    function getTileUV(tileId) {
-        const col = tileId % 4, row = Math.floor(tileId / 4);
+    // UV-прямоугольники тайлов считаем один раз: раньше на каждую грань
+    // каждого блока создавался новый объект — миллионы мусорных объектов.
+    const TILE_UV_CACHE = (function () {
+        const arr = new Array(64);
         const uSize = 0.25, vSize = 0.0625;
-        return { u0: col * uSize, v0: 1.0 - (row + 1) * vSize, u1: col * uSize + uSize, v1: 1.0 - row * vSize };
+        for (let id = 0; id < 64; id++) {
+            const col = id % 4, row = (id / 4) | 0;
+            arr[id] = {
+                u0: col * uSize, v0: 1.0 - (row + 1) * vSize,
+                u1: col * uSize + uSize, v1: 1.0 - row * vSize
+            };
+        }
+        return arr;
+    })();
+    function getTileUV(tileId) {
+        return TILE_UV_CACHE[tileId & 63];
     }
 
+    var TILE_LUT = null;
     function getBlockFaceTile(blockType, faceIndex) {
+        if (TILE_LUT && blockType >= 0 && blockType <= MAX_BLOCK_TYPE) {
+            return TILE_LUT[blockType * 6 + faceIndex];
+        }
+        return computeBlockFaceTile(blockType, faceIndex);
+    }
+    function computeBlockFaceTile(blockType, faceIndex) {
         if (blockType === BLOCK_GRASS) return faceIndex === 2 ? 0 : (faceIndex === 3 ? 1 : 2);
         if (blockType === BLOCK_DIRT) return 1;
         if (blockType === BLOCK_STONE) return 3;
@@ -4107,6 +4140,15 @@
         return 1;
     }
 
+    (function buildBlockLuts() {
+        OPAQUE_LUT = new Uint8Array(MAX_BLOCK_TYPE + 1);
+        TILE_LUT = new Uint8Array((MAX_BLOCK_TYPE + 1) * 6);
+        for (let t = 0; t <= MAX_BLOCK_TYPE; t++) {
+            OPAQUE_LUT[t] = isOpaqueCompute(t) ? 1 : 0;
+            for (let f = 0; f < 6; f++) TILE_LUT[t * 6 + f] = computeBlockFaceTile(t, f);
+        }
+    })();
+
     // --- 5. THREE.JS СЦЕНА И КЛАССИЧЕСКИЕ МАТЕРИАЛЫ ---
     const canvas = document.getElementById('game-canvas');
     function viewSize() {
@@ -4127,16 +4169,20 @@
         {
             // Pova Neo 3 / Redmi 10 / etc. Mali-G52, <=4GB RAM, 4 cores.
             // Aggressive downscale and minimal background activity to avoid OOM.
-            pixelRatio: 0.55,
+            pixelRatio: 0.60,
             minPixelRatio: 0.45,
-            maxPixelRatio: 0.70,
-            speechEvery: 0.05,
-            socialEvery: 0.10,
+            maxPixelRatio: 0.85,
+            speechEvery: 0.12,      // было 0.05 — пузыри речи почти каждый кадр
+            socialEvery: 1.20,      // было 0.10 — соц-логика деревни каждый 10-й кадр
             mobCap: 2,
             mobHardCap: 3,
             farLimit: 32,
-            burst: 2,
-            torchAcc: 0.10,
+            burst: 2,               // сборка чанка теперь дешёвая — грузим по два
+            torchAcc: 0.30,
+            torchLights: 2,
+            highlightEvery: 3,      // трассировка прицела не каждый кадр
+            maxDrops: 24,
+            adaptiveCooldown: 0
         } :
         {
         pixelRatio: Math.min(window.devicePixelRatio || 1, IS_TOUCH_PHONE ? 1.02 : 1.25),
@@ -4146,6 +4192,9 @@
         socialEvery: IS_TOUCH_PHONE ? 0.85 : 0.25,
         mobCap: IS_TOUCH_PHONE ? 8 : 18,
         mobHardCap: IS_TOUCH_PHONE ? 10 : 20,
+        torchLights: 6,
+        highlightEvery: 1,
+        maxDrops: 80,
         adaptiveCooldown: 0
     };
     let renderer;
@@ -4153,10 +4202,13 @@
         renderer = new THREE.WebGLRenderer({
             canvas,
             antialias: !IS_LOW_END,
-            powerPreference: IS_LOW_END ? 'low-power' : 'high-performance',
+            powerPreference: 'high-performance',
             failIfMajorPerformanceCaveat: false,
-            precision: IS_LOW_END ? 'lowp' : 'mediump',
-            depth: IS_LOW_END ? false : true
+            precision: 'mediump',   // lowp давал артефакты на Mali-G52
+            depth: true,            // без буфера глубины блоки рисуются друг сквозь друга
+            stencil: false,         // трафарет не используется — экономим память и заливку
+            alpha: false,
+            preserveDrawingBuffer: false
         });
     } catch (err) {
         try {
@@ -4168,6 +4220,7 @@
         }
     }
     renderer.setPixelRatio(PERF.pixelRatio);
+    if (renderer.shadowMap) renderer.shadowMap.enabled = false;
     (function bootSize() {
         const s = viewSize();
         renderer.setSize(s.w, s.h);
@@ -4177,7 +4230,9 @@
     scene.fog = new THREE.Fog(0x78B5E8, 42, 88);
 
     const _vs0 = viewSize();
-    const camera = new THREE.PerspectiveCamera(75, _vs0.w / _vs0.h, 0.1, 180);
+    // Дальняя плоскость 120 вместо 180: мир всё равно уходит в туман на 88,
+    // а короткий диапазон глубины точнее и дешевле для мобильного GPU.
+    const camera = new THREE.PerspectiveCamera(75, _vs0.w / _vs0.h, 0.1, 120);
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
     scene.add(ambientLight);
     
@@ -4430,8 +4485,10 @@
     let decorDirty = true;
     const decorGroup = new THREE.Group();
     scene.add(decorGroup);
+    // Каждый PointLight удорожает шейдер ВСЕХ вершин мира, поэтому
+    // на слабом телефоне держим только два ближайших факела.
     const torchLights = [];
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < (PERF.torchLights || 6); i++) {
         const L = new THREE.PointLight(0xffb14a, 0, 12, 1.6);
         scene.add(L);
         torchLights.push(L);
@@ -6608,8 +6665,17 @@
         });
     }
 
+    const _dropPlayerCenter = new THREE.Vector3();
     function updateDroppedItems(dt) {
-        const playerCenter = new THREE.Vector3(player.pos.x, player.pos.y + 0.75, player.pos.z);
+        const playerCenter = _dropPlayerCenter.set(player.pos.x, player.pos.y + 0.75, player.pos.z);
+        // Лимит предметов на земле: на слабом телефоне лишние спрайты
+        // и их физика съедают кадры (старые исчезают первыми).
+        const maxDrops = PERF.maxDrops || 80;
+        while (droppedItems.length > maxDrops) {
+            const old = droppedItems.shift();
+            scene.remove(old.mesh);
+            disposeDropMesh(old.mesh);
+        }
 
         for (let i = droppedItems.length - 1; i >= 0; i--) {
             const item = droppedItems[i];
@@ -6712,19 +6778,32 @@
         }
     }
 
-    function getChunkKey(cx, cz) { return `${cx},${cz}`; }
+    // Числовой ключ вместо строки `${cx},${cz}`: Map по числам заметно быстрее
+    // и не создаёт строковый мусор на каждый запрос блока.
+    function getChunkKey(cx, cz) { return cx * 1048576 + cz; }
+
+    // Кэш последнего чанка: соседние запросы почти всегда в одном чанке.
+    let _lastChunkKey = NaN, _lastChunkRef = null;
+    function chunkAt(cx, cz) {
+        const key = cx * 1048576 + cz;
+        if (key === _lastChunkKey) return _lastChunkRef;
+        const ch = chunks.get(key) || null;
+        _lastChunkKey = key; _lastChunkRef = ch;
+        return ch;
+    }
+    function invalidateChunkCache() { _lastChunkKey = NaN; _lastChunkRef = null; }
 
     function getBlock(wx, wy, wz) {
         if (wy < 0) return BLOCK_STONE;
         if (wy >= CHUNK_HEIGHT) return BLOCK_EMPTY;
-        const cx = Math.floor(wx / CHUNK_SIZE);
-        const cz = Math.floor(wz / CHUNK_SIZE);
-        const chunk = chunks.get(getChunkKey(cx, cz));
+        const cx = wx >= 0 ? (wx / CHUNK_SIZE) | 0 : Math.floor(wx / CHUNK_SIZE);
+        const cz = wz >= 0 ? (wz / CHUNK_SIZE) | 0 : Math.floor(wz / CHUNK_SIZE);
+        const chunk = chunkAt(cx, cz);
         if (!chunk || !chunk.isGenerated) return BLOCK_EMPTY;
 
-        const lx = (wx % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
-        const lz = (wz % CHUNK_SIZE + CHUNK_SIZE) % CHUNK_SIZE;
-        return chunk.getBlock(lx, wy, lz);
+        const lx = wx - cx * CHUNK_SIZE;
+        const lz = wz - cz * CHUNK_SIZE;
+        return chunk.blocks[lx + wy * CHUNK_SIZE + lz * CHUNK_SIZE * CHUNK_HEIGHT];
     }
 
     function setBlock(wx, wy, wz, type, silent) {
@@ -6902,12 +6981,22 @@
         }
         return best;
     }
+    // Кэш биома по клетке. nearestIsland() создаёт объекты и считает 9 хэшей,
+    // а при сборке чанка биом спрашивают десятки тысяч раз подряд.
+    const _biomeCache = new Map();
     function biomeAt(wx, wz) {
+        const key = wx * 1048576 + wz;
+        const hit = _biomeCache.get(key);
+        if (hit !== undefined) return hit;
         const isl = nearestIsland(wx, wz);
-        if (!isl) return 'ocean';
-        if (isl.d > isl.radius + 4) return 'ocean';
-        if (isl.d > isl.radius - 2.2) return 'beach';
-        return isl.biome;
+        let res;
+        if (!isl) res = 'ocean';
+        else if (isl.d > isl.radius + 4) res = 'ocean';
+        else if (isl.d > isl.radius - 2.2) res = 'beach';
+        else res = isl.biome;
+        if (_biomeCache.size > 40000) _biomeCache.clear();
+        _biomeCache.set(key, res);
+        return res;
     }
     function biomeTitle(id) {
         if (id === 'desert') return '🌵 Пустыня';
@@ -8573,20 +8662,26 @@
                     else { top = BLOCK_GRASS; fill = BLOCK_DIRT; }
                 }
 
-                for (let y = 0; y < CHUNK_HEIGHT; y++) {
-                    if (y === 0) chunk.setBlock(lx, y, lz, BLOCK_STONE);
-                    else if (y < h - 3) chunk.setBlock(lx, y, lz, (y < 16) ? BLOCK_DEEPSLATE : BLOCK_STONE);
+                // Прямая запись в типизированный массив: тот же результат,
+                // но без 32768 вызовов setBlock с проверками границ на чанк.
+                const colBase = lx + lz * CHUNK_SIZE * CHUNK_HEIGHT;
+                const cblocks = chunk.blocks;
+                const yTop = Math.max(h, WATER_LEVEL);
+                for (let y = 0; y <= yTop; y++) {
+                    let v = BLOCK_EMPTY;
+                    if (y === 0) v = BLOCK_STONE;
+                    else if (y < h - 3) v = (y < 16) ? BLOCK_DEEPSLATE : BLOCK_STONE;
                     else if (y < h) {
                         if (bio === 'mesa') {
                             const band = (h - y) % 4;
-                            chunk.setBlock(lx, y, lz, band === 1 ? BLOCK_SANDSTONE : (band === 2 ? BLOCK_SAND : BLOCK_TERRACOTTA));
-                        } else chunk.setBlock(lx, y, lz, fill);
+                            v = band === 1 ? BLOCK_SANDSTONE : (band === 2 ? BLOCK_SAND : BLOCK_TERRACOTTA);
+                        } else v = fill;
                     }
-                    else if (y === h) chunk.setBlock(lx, y, lz, top);
-                    else if (y > h && y <= WATER_LEVEL) {
-                        chunk.setBlock(lx, y, lz, BLOCK_WATER);
-                    }
+                    else if (y === h) v = top;
+                    else if (y > h && y <= WATER_LEVEL) v = BLOCK_WATER;
+                    if (v !== BLOCK_EMPTY) cblocks[colBase + y * CHUNK_SIZE] = v;
                 }
+                chunk.isDirty = true;
                 if (bio === 'swamp' && h < WATER_LEVEL) {
                     chunk.setBlock(lx, h, lz, BLOCK_CLAY);
                     if (h > 1) chunk.setBlock(lx, h - 1, lz, BLOCK_CLAY);
@@ -8749,6 +8844,15 @@
         }
         return offset;
     }
+    const MESH_FACES = [
+        { dir: [1, 0, 0], norm: [1, 0, 0], corners: [[1, 0, 0], [1, 1, 0], [1, 1, 1], [1, 0, 1]] },
+        { dir: [-1, 0, 0], norm: [-1, 0, 0], corners: [[0, 0, 1], [0, 1, 1], [0, 1, 0], [0, 0, 0]] },
+        { dir: [0, 1, 0], norm: [0, 1, 0], corners: [[0, 1, 1], [1, 1, 1], [1, 1, 0], [0, 1, 0]] },
+        { dir: [0, -1, 0], norm: [0, -1, 0], corners: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]] },
+        { dir: [0, 0, 1], norm: [0, 0, 1], corners: [[1, 0, 1], [1, 1, 1], [0, 1, 1], [0, 0, 1]] },
+        { dir: [0, 0, -1], norm: [0, 0, -1], corners: [[0, 0, 0], [0, 1, 0], [1, 1, 0], [1, 0, 0]] }
+    ];
+
     function rebuildChunkMesh(chunk) {
         const solidPos = [], solidNorm = [], solidUV = [], solidIdx = [];
         let solidOffset = 0;
@@ -8760,21 +8864,50 @@
         const startX = chunk.cx * CHUNK_SIZE;
         const startZ = chunk.cz * CHUNK_SIZE;
 
-        const faces = [
-            { dir: [1, 0, 0], norm: [1, 0, 0], corners: [[1, 0, 0], [1, 1, 0], [1, 1, 1], [1, 0, 1]] },
-            { dir: [-1, 0, 0], norm: [-1, 0, 0], corners: [[0, 0, 1], [0, 1, 1], [0, 1, 0], [0, 0, 0]] },
-            { dir: [0, 1, 0], norm: [0, 1, 0], corners: [[0, 1, 1], [1, 1, 1], [1, 1, 0], [0, 1, 0]] },
-            { dir: [0, -1, 0], norm: [0, -1, 0], corners: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]] },
-            { dir: [0, 0, 1], norm: [0, 0, 1], corners: [[1, 0, 1], [1, 1, 1], [0, 1, 1], [0, 0, 1]] },
-            { dir: [0, 0, -1], norm: [0, 0, -1], corners: [[0, 0, 0], [0, 1, 0], [1, 1, 0], [1, 0, 0]] }
-        ];
+        const faces = MESH_FACES;
+        const blocks = chunk.blocks;
+        const COL_STRIDE = CHUNK_SIZE;                 // шаг по y внутри колонки
+        const ROW_STRIDE = CHUNK_SIZE * CHUNK_HEIGHT;  // шаг по z
 
+        // Соседние чанки берём один раз. Раньше каждая из шести граней каждого
+        // блока шла через getBlock() с делениями и поиском по Map.
+        const nbXm = chunks.get(getChunkKey(chunk.cx - 1, chunk.cz)) || null;
+        const nbXp = chunks.get(getChunkKey(chunk.cx + 1, chunk.cz)) || null;
+        const nbZm = chunks.get(getChunkKey(chunk.cx, chunk.cz - 1)) || null;
+        const nbZp = chunks.get(getChunkKey(chunk.cx, chunk.cz + 1)) || null;
+        function fastBlock(wx2, wy2, wz2) {
+            if (wy2 < 0) return BLOCK_STONE;
+            if (wy2 >= CHUNK_HEIGHT) return BLOCK_EMPTY;
+            const lx2 = wx2 - startX, lz2 = wz2 - startZ;
+            if (lx2 >= 0 && lx2 < CHUNK_SIZE && lz2 >= 0 && lz2 < CHUNK_SIZE) {
+                return blocks[lx2 + wy2 * COL_STRIDE + lz2 * ROW_STRIDE];
+            }
+            let nb = null, ax = lx2, az = lz2;
+            if (lx2 === -1 && lz2 >= 0 && lz2 < CHUNK_SIZE) { nb = nbXm; ax = CHUNK_SIZE - 1; }
+            else if (lx2 === CHUNK_SIZE && lz2 >= 0 && lz2 < CHUNK_SIZE) { nb = nbXp; ax = 0; }
+            else if (lz2 === -1 && lx2 >= 0 && lx2 < CHUNK_SIZE) { nb = nbZm; az = CHUNK_SIZE - 1; }
+            else if (lz2 === CHUNK_SIZE && lx2 >= 0 && lx2 < CHUNK_SIZE) { nb = nbZp; az = 0; }
+            else return getBlock(wx2, wy2, wz2);
+            if (!nb || !nb.isGenerated) return BLOCK_EMPTY;
+            return nb.blocks[ax + wy2 * COL_STRIDE + az * ROW_STRIDE];
+        }
+
+        // Порядок циклов: колонка (lx,lz) -> высота. Так биом считается один раз
+        // на колонку, а не на каждый из 128 блоков (раньше это были десятки
+        // тысяч вызовов nearestIsland на чанк).
         for (let lx = 0; lx < CHUNK_SIZE; lx++) {
-            for (let y = 0; y < CHUNK_HEIGHT; y++) {
-                for (let lz = 0; lz < CHUNK_SIZE; lz++) {
-                    const block = chunk.getBlock(lx, y, lz);
+            for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+                const wx = startX + lx, wz = startZ + lz;
+                const colBase = lx + lz * ROW_STRIDE;
+                let colTop = -1;
+                for (let y = CHUNK_HEIGHT - 1; y >= 0; y--) {
+                    if (blocks[colBase + y * COL_STRIDE] !== BLOCK_EMPTY) { colTop = y; break; }
+                }
+                if (colTop < 0) continue;
+                let gbioCache = null;
+                for (let y = 0; y <= colTop; y++) {
+                    const block = blocks[colBase + y * COL_STRIDE];
                     if (block === BLOCK_EMPTY || block === BLOCK_TORCH || block === BLOCK_BED) continue;
-                    const wx = startX + lx, wz = startZ + lz;
                     if (block === BLOCK_DOOR_OPEN) {
                         const leaf = 0.10;
                         const wallNS = isDoorNeighbor(getBlock(wx, y, wz - 1)) && isDoorNeighbor(getBlock(wx, y, wz + 1));
@@ -8787,7 +8920,8 @@
                         }
                         continue;
                     }
-                    const gbio = biomeAt(wx, wz);
+                    if (gbioCache === null) gbioCache = biomeAt(wx, wz);
+                    const gbio = gbioCache;
 
                     if (isFenceBlock(block)) {
                         solidOffset = emitFenceGeometry(wx, y, wz, block, solidPos, solidNorm, solidUV, solidIdx, solidOffset);
@@ -8798,8 +8932,8 @@
                         const gTile = getTileUV(21);
                         for (let f = 0; f < 6; f++) {
                             const nx = wx + faces[f].dir[0], ny = y + faces[f].dir[1], nz = wz + faces[f].dir[2];
-                            const nb = getBlock(nx, ny, nz);
-                            if (nb === BLOCK_GLASS || isOpaque(nb)) continue;
+                            const nb = fastBlock(nx, ny, nz);
+                            if (nb === BLOCK_GLASS || OPAQUE_LUT[nb] === 1) continue;
                             for (let c = 0; c < 4; c++) {
                                 glassPos.push(wx + faces[f].corners[c][0], y + faces[f].corners[c][1], wz + faces[f].corners[c][2]);
                                 glassNorm.push(faces[f].norm[0], faces[f].norm[1], faces[f].norm[2]);
@@ -8812,7 +8946,7 @@
                         const topH = 0.9375;
                         for (let f = 0; f < 6; f++) {
                             const nx = wx + faces[f].dir[0], ny = y + faces[f].dir[1], nz = wz + faces[f].dir[2];
-                            if (!isOpaque(getBlock(nx, ny, nz))) {
+                            if (OPAQUE_LUT[fastBlock(nx, ny, nz)] !== 1) {
                                 for (let c = 0; c < 4; c++) {
                                     const cy = faces[f].corners[c][1] === 1 ? topH : faces[f].corners[c][1];
                                     solidPos.push(wx + faces[f].corners[c][0], y + cy, wz + faces[f].corners[c][2]);
@@ -8829,7 +8963,7 @@
 
                         for (let f = 0; f < 6; f++) {
                             const nx = wx + faces[f].dir[0], ny = y + faces[f].dir[1], nz = wz + faces[f].dir[2];
-                            if (getBlock(nx, ny, nz) === BLOCK_EMPTY) {
+                            if (fastBlock(nx, ny, nz) === BLOCK_EMPTY) {
                                 for (let c = 0; c < 4; c++) {
                                     // Верхняя грань воды на классической высоте 0.9 блока
                                     const cornerY = (f === 2) ? 0.9 : faces[f].corners[c][1];
@@ -8853,7 +8987,7 @@
                     } else {
                         for (let f = 0; f < 6; f++) {
                             const nx = wx + faces[f].dir[0], ny = y + faces[f].dir[1], nz = wz + faces[f].dir[2];
-                            if (!isOpaque(getBlock(nx, ny, nz))) {
+                            if (OPAQUE_LUT[fastBlock(nx, ny, nz)] !== 1) {
                                 for (let c = 0; c < 4; c++) {
                                     solidPos.push(wx + faces[f].corners[c][0], y + faces[f].corners[c][1], wz + faces[f].corners[c][2]);
                                     solidNorm.push(faces[f].norm[0], faces[f].norm[1], faces[f].norm[2]);
@@ -8936,6 +9070,7 @@
                 if (!chunks.has(key)) {
                     const chunk = new Chunk(cx, cz);
                     chunks.set(key, chunk);
+                    invalidateChunkCache();
                     try {
                         generateChunkTerrain(chunk);
                     } catch (err) {
@@ -8951,10 +9086,13 @@
             if (dist > RENDER_DISTANCE + 1) {
                 chunk.dispose();
                 chunks.delete(key);
+                invalidateChunkCache();
             }
         }
 
-        const burst = firstChunkBurst ? (IS_TOUCH_PHONE ? 5 : 9) : (IS_TOUCH_PHONE ? 1 : 2);
+        const burst = firstChunkBurst
+            ? (IS_TOUCH_PHONE ? 5 : 9)
+            : (PERF.burst || (IS_TOUCH_PHONE ? 1 : 2));
         let builtCount = 0;
         for (const chunk of chunks.values()) {
             if (!chunk.isDirty || !chunk.isGenerated) continue;
@@ -11486,6 +11624,7 @@
     let lastTime = performance.now();
     let frameCount = 0, fpsTimer = 0;
     let speechAcc = 0, socialAcc = 0, torchAcc = 0, chunkAcc = 999;
+    let highlightTick = 99;
     let lastChunkCX = null, lastChunkCZ = null;
     const statsEl = document.getElementById('stats').firstElementChild;
 
@@ -11506,7 +11645,7 @@
         updateDroppedItems(dt);
         updateFallingBlocks(dt);
         torchAcc += dt;
-        if (torchAcc >= (IS_TOUCH_PHONE ? 0.26 : 0.08)) {
+        if (torchAcc >= (PERF.torchAcc || (IS_TOUCH_PHONE ? 0.26 : 0.08))) {
             updateTorchLights(currentTime * 0.001);
             torchAcc = 0;
         }
@@ -11538,6 +11677,13 @@
             statsEl.innerText = `FPS: ${frameCount} | ${biomeTitle(bioNow)} | Mobs: ${mobs.length}`;
             announceBiome(bioNow);
             if (IS_TOUCH_PHONE) {
+                // Совсем тяжёлый кадр — сначала выключаем небесные украшения,
+                // и только потом продолжаем резать разрешение.
+                if (frameCount < 18) {
+                    if (cloudsMesh && cloudsMesh.visible) cloudsMesh.visible = false;
+                } else if (frameCount > 42 && cloudsMesh && !cloudsMesh.visible) {
+                    cloudsMesh.visible = true;
+                }
                 PERF.adaptiveCooldown = Math.max(0, PERF.adaptiveCooldown - 1);
                 if (frameCount < 24 && PERF.pixelRatio > PERF.minPixelRatio && PERF.adaptiveCooldown <= 0) {
                     PERF.pixelRatio = Math.max(PERF.minPixelRatio, PERF.pixelRatio - 0.04);
@@ -11602,12 +11748,18 @@
             highlightBox.position.set(mining.x + 0.5, mining.y + 0.5, mining.z + 0.5);
             highlightBox.visible = true;
         } else {
-            const hit = raycastVoxel();
-            if (hit.hit && !hit.isMob) {
-                highlightBox.position.set(hit.block.x + 0.5, hit.block.y + 0.5, hit.block.z + 0.5);
-                highlightBox.visible = true;
-            } else {
-                highlightBox.visible = false;
+            // Луч до блока под прицелом — заметная нагрузка на CPU, на слабом
+            // устройстве считаем его раз в несколько кадров, рамка не мигает.
+            highlightTick++;
+            if (highlightTick >= (PERF.highlightEvery || 1)) {
+                highlightTick = 0;
+                const hit = raycastVoxel();
+                if (hit.hit && !hit.isMob) {
+                    highlightBox.position.set(hit.block.x + 0.5, hit.block.y + 0.5, hit.block.z + 0.5);
+                    highlightBox.visible = true;
+                } else {
+                    highlightBox.visible = false;
+                }
             }
         }
 
