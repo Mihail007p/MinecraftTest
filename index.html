@@ -1840,10 +1840,16 @@
     }
     const MC_TEX = { tiles: new Array(64) };
     (function buildMcTextures() {
+        // Старый хэш был линейным по x и y с одним раундом перемешивания —
+        // из-за этого ВСЕ текстуры покрывались одинаковыми диагональными
+        // полосами. Здесь оси хэшируются независимо и добавлен полный
+        // avalanche-финиш, так что шум становится настоящим «крапом» как в MC.
         function hash(x, y, s) {
-            let n = Math.imul(x * 374761393 + y * 668265263 + s * 1274126177, 1597334677);
-            n = (n ^ (n >>> 13)) >>> 0;
-            return n;
+            let h = Math.imul(x | 0, 0x27d4eb2d) ^ Math.imul(y | 0, 0x165667b1) ^ Math.imul(s | 0, 0x9e3779b1);
+            h ^= h >>> 15; h = Math.imul(h, 0x85ebca6b);
+            h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35);
+            h ^= h >>> 16;
+            return h >>> 0;
         }
         function n01(x, y, s) { return (hash(x, y, s) % 1024) / 1024; }
         function fbm(x, y, s) {
@@ -2012,14 +2018,17 @@
             }
         });
         MC_TEX.tiles[11] = make(function (s) {
+            // Раньше здесь были строки rgba(...), а сборщик атласа умеет только
+            // #rrggbb — вода уходила в текстуру чёрным пятном.
             for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
                 const w = Math.sin((x * 0.45) + Math.sin(y * 0.35) * 2.2);
-                const c1 = w > 0 ? 'rgba(40, 105, 210, 0.55)' : 'rgba(22, 70, 170, 0.52)';
-                s(x, y, c1);
+                let c = w > 0 ? '#2f6fd0' : '#2358b4';
+                c = mixHex(c, w > 0 ? '#4b8ce8' : '#1c4a9c', n01(x, y, 91) * 0.6);
+                s(x, y, c);
             }
             for (let y = 4; y < 32; y += 5) {
                 const ox = (y % 10 === 4) ? 0 : 3;
-                for (let x = ox; x < 32; x += 6) s(x, y, 'rgba(150, 210, 255, 0.42)');
+                for (let x = ox; x < 32; x += 6) s(x, y, '#7cc0f0');
             }
         });
         MC_TEX.tiles[12] = make(function (s) {
@@ -2188,16 +2197,42 @@
             for (let y = 20; y < 28; y++) for (let x = 12; x < 20; x++) s(x, y, '#ff7722');
         });
 
-        function oreTile(speckle, glow) {
+        // Руда как в Minecraft: каменный фон и несколько компактных вкраплений
+        // с тёмной обводкой и бликом. Раньше вся плитка была засыпана точками —
+        // блок выглядел как шум, а не как руда.
+        function oreTile(seed, glow) {
             return make(function (s) {
-                for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
-                    let c = stoneCol(x, y);
-                    const v = n01(x, y, speckle + 3);
-                    if (v > 0.78) c = glow;
-                    else if (v > 0.70) c = mixHex(c, glow, 0.55);
-                    if (n01(x, y, speckle + 9) > 0.93) c = mixHex(glow, '#ffffff', 0.35);
-                    s(x, y, c);
+                const grid = [];
+                for (let y = 0; y < 32; y++) {
+                    grid.push(new Array(32).fill(null));
+                    for (let x = 0; x < 32; x++) grid[y][x] = stoneCol(x, y);
                 }
+                const dark = shade(glow, 0.55);
+                const lite = mixHex(glow, '#ffffff', 0.45);
+                const blobs = 5 + (hash(seed, 7, 1) % 3);
+                for (let b = 0; b < blobs; b++) {
+                    const cx = 4 + (hash(seed, b, 21) % 24);
+                    const cy = 4 + (hash(seed, b, 22) % 24);
+                    const rx = 2 + (hash(seed, b, 23) % 3);
+                    const ry = 2 + (hash(seed, b, 24) % 3);
+                    for (let dy = -ry - 1; dy <= ry + 1; dy++) {
+                        for (let dx = -rx - 1; dx <= rx + 1; dx++) {
+                            const x = cx + dx, y = cy + dy;
+                            if (x < 0 || y < 0 || x > 31 || y > 31) continue;
+                            const d = (dx * dx) / (rx * rx) + (dy * dy) / (ry * ry);
+                            const wob = n01(x, y, seed + b) * 0.45;
+                            if (d <= 1.0 + wob * 0.2) {
+                                let c = glow;
+                                if (d < 0.35) c = lite;
+                                else if (d > 0.75) c = mixHex(glow, dark, 0.5);
+                                grid[y][x] = c;
+                            } else if (d <= 1.5 + wob) {
+                                grid[y][x] = mixHex(grid[y][x], dark, 0.65);
+                            }
+                        }
+                    }
+                }
+                for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) s(x, y, grid[y][x]);
             });
         }
         MC_TEX.tiles[32] = oreTile(32, '#2a2a2a');
@@ -4022,22 +4057,34 @@
 
 
     // --- 4. ТЕКСТУРНЫЙ АТЛАС (С классической текстурой воды) ---
+    // Атлас: ячейка 64x64, внутри тайл 32x32 по центру, вокруг — 16 пикселей
+    // продолжения краёв. Поля нужны для мип-уровней: без них уменьшенные копии
+    // размазывают соседние тайлы друг в друга и вдали появляется грязь.
+    const ATLAS_CELL = 64;
+    const ATLAS_PAD = 16;
+    const ATLAS_COLS = 4;
+    const ATLAS_ROWS = 16;
+    const ATLAS_W = ATLAS_COLS * ATLAS_CELL;   // 256
+    const ATLAS_H = ATLAS_ROWS * ATLAS_CELL;   // 1024
     function createTextureAtlas() {
         const canvas = document.createElement('canvas');
-        canvas.width = 128; canvas.height = 512;
+        canvas.width = ATLAS_W; canvas.height = ATLAS_H;
         const ctx = canvas.getContext('2d');
         ctx.imageSmoothingEnabled = false;
-        const img = ctx.createImageData(128, 512);
+        const img = ctx.createImageData(ATLAS_W, ATLAS_H);
         const data = img.data;
         for (let id = 0; id < 64; id++) {
             const tile = MC_TEX.tiles[id];
             if (!tile) continue;
-            const ox = (id % 4) * 32, oy = Math.floor(id / 4) * 32;
-            for (let y = 0; y < 32; y++) {
-                for (let x = 0; x < 32; x++) {
-                    const hex = tile[y * 32 + x] || '#7a7a7a';
+            const ox = (id % ATLAS_COLS) * ATLAS_CELL, oy = ((id / ATLAS_COLS) | 0) * ATLAS_CELL;
+            for (let y = 0; y < ATLAS_CELL; y++) {
+                // координата внутри тайла с зажимом — так поля повторяют край
+                let ty = y - ATLAS_PAD; if (ty < 0) ty = 0; else if (ty > 31) ty = 31;
+                for (let x = 0; x < ATLAS_CELL; x++) {
+                    let tx = x - ATLAS_PAD; if (tx < 0) tx = 0; else if (tx > 31) tx = 31;
+                    const hex = tile[ty * 32 + tx] || '#7a7a7a';
                     const n = parseInt(hex.charAt(0) === '#' ? hex.slice(1) : hex, 16);
-                    const p = ((oy + y) * 128 + (ox + x)) * 4;
+                    const p = ((oy + y) * ATLAS_W + (ox + x)) * 4;
                     data[p] = (n >> 16) & 255;
                     data[p + 1] = (n >> 8) & 255;
                     data[p + 2] = n & 255;
@@ -4047,9 +4094,16 @@
         }
         ctx.putImageData(img, 0, 0);
         const texture = new THREE.CanvasTexture(canvas);
+        // Вблизи — честные пиксели (Nearest), вдали — мип-уровни и анизотропия,
+        // иначе далёкие блоки «кипят» и рябят при каждом шаге.
         texture.magFilter = THREE.NearestFilter;
-        texture.minFilter = THREE.NearestFilter;
-        texture.generateMipmaps = false;
+        texture.minFilter = THREE.NearestMipmapLinearFilter;
+        texture.generateMipmaps = true;
+        try {
+            const maxAniso = (renderer && renderer.capabilities && renderer.capabilities.getMaxAnisotropy)
+                ? renderer.capabilities.getMaxAnisotropy() : 1;
+            texture.anisotropy = Math.min(4, maxAniso || 1);
+        } catch (e) { texture.anisotropy = 1; }
         return texture;
     }
 
@@ -4057,12 +4111,13 @@
     // каждого блока создавался новый объект — миллионы мусорных объектов.
     const TILE_UV_CACHE = (function () {
         const arr = new Array(64);
-        const uSize = 0.25, vSize = 0.0625;
         for (let id = 0; id < 64; id++) {
-            const col = id % 4, row = (id / 4) | 0;
+            const col = id % ATLAS_COLS, row = (id / ATLAS_COLS) | 0;
+            const x0 = col * ATLAS_CELL + ATLAS_PAD, x1 = x0 + 32;
+            const y0 = row * ATLAS_CELL + ATLAS_PAD, y1 = y0 + 32;
             arr[id] = {
-                u0: col * uSize, v0: 1.0 - (row + 1) * vSize,
-                u1: col * uSize + uSize, v1: 1.0 - row * vSize
+                u0: x0 / ATLAS_W, u1: x1 / ATLAS_W,
+                v0: 1.0 - y1 / ATLAS_H, v1: 1.0 - y0 / ATLAS_H
             };
         }
         return arr;
@@ -4169,9 +4224,12 @@
         {
             // Pova Neo 3 / Redmi 10 / etc. Mali-G52, <=4GB RAM, 4 cores.
             // Aggressive downscale and minimal background activity to avoid OOM.
-            pixelRatio: 0.60,
-            minPixelRatio: 0.45,
-            maxPixelRatio: 0.85,
+            // Раньше кадр рисовался в 0.55-0.6 от CSS-размера (примерно 460x210
+            // пикселей на весь экран) — отсюда «мыло». После ускорения движка
+            // можно рисовать в полном CSS-разрешении и выше.
+            pixelRatio: Math.min(window.devicePixelRatio || 1, 1.0),
+            minPixelRatio: 0.7,
+            maxPixelRatio: Math.min(window.devicePixelRatio || 1, 1.4),
             speechEvery: 0.12,      // было 0.05 — пузыри речи почти каждый кадр
             socialEvery: 1.20,      // было 0.10 — соц-логика деревни каждый 10-й кадр
             mobCap: 2,
@@ -11685,14 +11743,14 @@
                     cloudsMesh.visible = true;
                 }
                 PERF.adaptiveCooldown = Math.max(0, PERF.adaptiveCooldown - 1);
-                if (frameCount < 24 && PERF.pixelRatio > PERF.minPixelRatio && PERF.adaptiveCooldown <= 0) {
-                    PERF.pixelRatio = Math.max(PERF.minPixelRatio, PERF.pixelRatio - 0.04);
+                if (frameCount < 25 && PERF.pixelRatio > PERF.minPixelRatio && PERF.adaptiveCooldown <= 0) {
+                    PERF.pixelRatio = Math.max(PERF.minPixelRatio, PERF.pixelRatio - 0.06);
                     renderer.setPixelRatio(PERF.pixelRatio);
                     const s = viewSize();
                     renderer.setSize(s.w, s.h, false);
                     PERF.adaptiveCooldown = 4;
-                } else if (frameCount > 54 && PERF.pixelRatio < PERF.maxPixelRatio && PERF.adaptiveCooldown <= 0) {
-                    PERF.pixelRatio = Math.min(PERF.maxPixelRatio, PERF.pixelRatio + 0.03);
+                } else if (frameCount > 40 && PERF.pixelRatio < PERF.maxPixelRatio && PERF.adaptiveCooldown <= 0) {
+                    PERF.pixelRatio = Math.min(PERF.maxPixelRatio, PERF.pixelRatio + 0.05);
                     renderer.setPixelRatio(PERF.pixelRatio);
                     const s = viewSize();
                     renderer.setSize(s.w, s.h, false);
