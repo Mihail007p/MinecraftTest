@@ -503,6 +503,37 @@
             line-height: 1;
         }
         #btn-sandbox:active { background: rgba(255, 255, 255, 0.35); transform: scale(0.92); }
+        #btn-quality {
+            position: absolute;
+            top: 218px;
+            right: 10px;
+            width: 44px;
+            height: 44px;
+            border-radius: 8px;
+            border: 2px solid rgba(255, 255, 255, 0.25);
+            background: rgba(0, 0, 0, 0.55);
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: auto;
+            z-index: 20;
+            backdrop-filter: blur(4px);
+            font-size: 13px;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+            line-height: 1;
+        }
+        #btn-quality:active { background: rgba(255, 255, 255, 0.35); transform: scale(0.92); }
+        #btn-quality.ultra {
+            background: rgba(20, 90, 80, 0.85);
+            border-color: rgba(120, 255, 220, 0.6);
+            box-shadow: 0 0 10px rgba(80, 255, 210, 0.4);
+        }
+        #btn-quality.hd {
+            background: rgba(30, 70, 120, 0.85);
+            border-color: rgba(150, 200, 255, 0.55);
+        }
         #sandbox-overlay {
             position: absolute; inset: 0;
             background: rgba(0,0,0,0.58);
@@ -1231,6 +1262,7 @@
 
     <div id="btn-night" title="Ночь">🌙</div>
     <div id="btn-sandbox" title="Песочница жителей">🧪</div>
+    <div id="btn-quality" title="Качество картинки">HD</div>
 
     <div id="sandbox-overlay">
         <div id="sandbox-panel">
@@ -9882,12 +9914,13 @@
         if (touchHitsRect(touch, document.getElementById('btn-inventory'), 8)) return true;
         if (touchHitsRect(touch, document.getElementById('btn-night'), 8)) return true;
         if (touchHitsRect(touch, document.getElementById('btn-sandbox'), 8)) return true;
+        if (touchHitsRect(touch, document.getElementById('btn-quality'), 8)) return true;
         if (touchHitsRect(touch, document.getElementById('respawn-btn'), 8)) return true;
         if (touchHitsRect(touch, document.querySelector('.btn-group'), 8)) return true;
         const t = touch.target;
         if (!t || !t.closest) return false;
         return !!(t.closest('#install-banner') || t.closest('#install-help') || t.closest('#hotbar') || t.closest('.slot') || t.closest('.action-btn') ||
-                  t.closest('#respawn-btn') || t.closest('#btn-fullscreen') || t.closest('#btn-inventory') || t.closest('#btn-night') || t.closest('#btn-sandbox') ||
+                  t.closest('#respawn-btn') || t.closest('#btn-fullscreen') || t.closest('#btn-inventory') || t.closest('#btn-night') || t.closest('#btn-sandbox') || t.closest('#btn-quality') ||
                   t.closest('#inv-overlay') || t.closest('#trade-overlay') || t.closest('#chat-overlay') || t.closest('#sandbox-overlay') || t.closest('#death-screen'));
     }
 
@@ -11255,8 +11288,68 @@
         const s = viewSize();
         camera.aspect = s.w / Math.max(1, s.h);
         camera.updateProjectionMatrix();
+        renderer.setPixelRatio(PERF.pixelRatio);
         renderer.setSize(s.w, s.h);
     }
+
+    // --- РЕЖИМЫ КАЧЕСТВА КАРТИНКИ ---
+    // АВТО — движок сам держит баланс FPS/чёткости.
+    // HD   — рисуем ровно в физическом разрешении экрана (у Pova Neo 3 это 1600x720).
+    // 4K   — суперсэмплинг: кадр рисуется крупнее экрана и уменьшается при выводе,
+    //        края блоков становятся гладкими, «лесенка» пропадает.
+    const QUALITY_MODES = ['auto', 'hd', 'ultra'];
+    const QUALITY_LABEL = { auto: 'АВТО', hd: 'HD', ultra: '4K' };
+    const MAX_FRAME_PIXELS = 3.6e6;   // потолок, чтобы не убить память GPU
+    let qualityMode = 'auto';
+    let qualityGuard = 0;
+    const btnQuality = document.getElementById('btn-quality');
+
+    function qualityRatioFor(mode) {
+        const dpr = window.devicePixelRatio || 1;
+        const s = viewSize();
+        let r;
+        if (mode === 'hd') r = Math.min(dpr, 2.0);
+        else if (mode === 'ultra') r = Math.min(Math.max(dpr, 1) * 1.5, 2.5);
+        else return PERF.pixelRatio;
+        const maxByPixels = Math.sqrt(MAX_FRAME_PIXELS / Math.max(1, s.w * s.h));
+        return Math.max(0.5, Math.min(r, maxByPixels));
+    }
+    function applyQuality(mode, silent) {
+        qualityMode = QUALITY_MODES.indexOf(mode) >= 0 ? mode : 'auto';
+        qualityGuard = 0;
+        const s = viewSize();
+        if (qualityMode === 'auto') {
+            PERF.pixelRatio = Math.min(PERF.maxPixelRatio, Math.max(PERF.minPixelRatio, 1.0));
+        } else {
+            PERF.pixelRatio = qualityRatioFor(qualityMode);
+        }
+        renderer.setPixelRatio(PERF.pixelRatio);
+        renderer.setSize(s.w, s.h, false);
+        if (btnQuality) {
+            btnQuality.textContent = QUALITY_LABEL[qualityMode];
+            btnQuality.classList.toggle('hd', qualityMode === 'hd');
+            btnQuality.classList.toggle('ultra', qualityMode === 'ultra');
+        }
+        try { localStorage.setItem('mc_quality', qualityMode); } catch (e) {}
+        if (!silent && typeof showInvToast === 'function') {
+            const w = Math.round(s.w * PERF.pixelRatio), h = Math.round(s.h * PERF.pixelRatio);
+            showInvToast('Качество: ' + QUALITY_LABEL[qualityMode] + ' · ' + w + '×' + h);
+        }
+    }
+    function cycleQuality(e) {
+        if (e) { e.preventDefault(); e.stopPropagation(); }
+        const i = QUALITY_MODES.indexOf(qualityMode);
+        applyQuality(QUALITY_MODES[(i + 1) % QUALITY_MODES.length]);
+    }
+    if (btnQuality) {
+        btnQuality.addEventListener('touchstart', cycleQuality, { passive: false });
+        btnQuality.addEventListener('click', cycleQuality);
+    }
+    (function restoreQuality() {
+        let saved = null;
+        try { saved = localStorage.getItem('mc_quality'); } catch (e) {}
+        applyQuality(saved || (IS_LOW_END ? 'auto' : 'hd'), true);
+    })();
     window.addEventListener('resize', fitRenderer);
     window.addEventListener('orientationchange', function () { setTimeout(fitRenderer, 200); });
 
@@ -11802,7 +11895,18 @@
             const bioNow = biomeAt(Math.floor(player.pos.x), Math.floor(player.pos.z));
             statsEl.innerText = `FPS: ${frameCount} | ${biomeTitle(bioNow)} | Mobs: ${mobs.length}`;
             announceBiome(bioNow);
-            if (IS_TOUCH_PHONE) {
+            if (qualityMode !== 'auto') {
+                // В фиксированном режиме разрешение не трогаем, но если телефон
+                // совсем не тянет — сами возвращаемся в АВТО, чтобы игра не встала.
+                if (frameCount < 14) {
+                    qualityGuard++;
+                    if (qualityGuard >= 3) {
+                        const next = qualityMode === 'ultra' ? 'hd' : 'auto';
+                        applyQuality(next);
+                        showInvToast('Тяжело для телефона — переключил на ' + QUALITY_LABEL[next]);
+                    }
+                } else qualityGuard = 0;
+            } else if (IS_TOUCH_PHONE) {
                 // Совсем тяжёлый кадр — сначала выключаем небесные украшения,
                 // и только потом продолжаем резать разрешение.
                 if (frameCount < 18) {
