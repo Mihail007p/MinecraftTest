@@ -1,5 +1,15 @@
 # MinecraftTest
 
+## ▶️ Играть
+
+**https://rawcdn.githack.com/Mihail007p/MinecraftTest/arena/01a0432c-minecrafttest/index.html**
+
+(githack один раз спросит подтверждение — нажми «Open the page»)
+
+Без подтверждения:
+**https://htmlpreview.github.io/?https://github.com/Mihail007p/MinecraftTest/blob/arena/01a0432c-minecrafttest/index.html**
+
+---
 Мобильная веб-версия Minecraft-подобной песочницы (один файл `index.html`, Three.js внутри).
 
 ## Запуск через githack
