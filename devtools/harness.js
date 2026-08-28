@@ -50,6 +50,9 @@ function makeElement(tag) {
     setAttribute() {}, getAttribute() { return null; }, removeAttribute() {}, focus() {}, blur() {}, click() {},
     querySelector() { return makeElement('div'); }, querySelectorAll() { return []; },
     getBoundingClientRect() { return { left: 0, top: 0, right: 800, bottom: 400, width: 800, height: 400, x: 0, y: 0 }; },
+    get firstElementChild() { if (!this._fec) this._fec = makeElement('div'); return this._fec; },
+    get lastElementChild() { return this.firstElementChild; },
+    get parentElement() { return null; },
     getContext(kind) {
       if (kind === '2d') { if (!this._buf) this._buf = new Uint8Array(this.width * this.height * 4); return makeCtx2D(this); }
       return null;

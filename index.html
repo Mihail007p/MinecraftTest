@@ -9251,14 +9251,19 @@
         const burst = firstChunkBurst
             ? (IS_TOUCH_PHONE ? 5 : 9)
             : (PERF.burst || (IS_TOUCH_PHONE ? 1 : 2));
+        // Бюджет времени на сборку: лучше собрать чанк на кадр позже, чем
+        // уронить кадр на 40 мс и получить рывок под ногами.
+        const _now = (typeof performance !== 'undefined' && performance.now) ? function () { return performance.now(); } : Date.now;
+        const tStart = _now();
+        const budgetMs = firstChunkBurst ? 1e9 : (IS_LOW_END ? 7 : 14);
         let builtCount = 0;
         for (const chunk of chunks.values()) {
             if (!chunk.isDirty || !chunk.isGenerated) continue;
             try { rebuildChunkMesh(chunk); } catch (e) {}
             builtCount++;
-            if (builtCount >= burst) break;
+            if (builtCount >= burst || _now() - tStart > budgetMs) break;
         }
-        while (chunkBuildQueue.length > 0 && builtCount < burst) {
+        while (chunkBuildQueue.length > 0 && builtCount < burst && _now() - tStart <= budgetMs) {
             const chunk = chunkBuildQueue.shift();
             if (chunks.has(getChunkKey(chunk.cx, chunk.cz))) {
                 try {
@@ -9567,7 +9572,13 @@
     }
     document.getElementById('respawn-btn').addEventListener('click', respawnPlayer);
 
+    let _hudHealth = -1, _hudOxy = -1, _hudUnder = null;
     function updateHUD() {
+        // Раньше 20 элементов сердец/пузырей пересобирались КАЖДЫЙ кадр —
+        // браузер на каждом кадре пересчитывал вёрстку, отсюда микро-рывки.
+        const oxyStep = Math.round(player.oxygen);
+        if (player.health === _hudHealth && oxyStep === _hudOxy && player.isUnderwater === _hudUnder) return;
+        _hudHealth = player.health; _hudOxy = oxyStep; _hudUnder = player.isUnderwater;
         let heartsHTML = '';
         for (let i = 0; i < 10; i++) {
             const hVal = player.health - (i * 2);
@@ -9590,6 +9601,7 @@
     updateHUD();
     updateHotbarUI();
 
+    let camEyeY = null;
     function updatePhysics(dt) {
         if (player.isDead) return;
 
@@ -9658,14 +9670,22 @@
 
         const isMoving = (Math.abs(moveInput.x) > 0.1 || Math.abs(moveInput.y) > 0.1);
         if ((collidedX || collidedZ) && player.onGround && !player.isInWater && isMoving) {
-            const stepY = player.pos.y + 1.15;
-            const stepForwardX = player.pos.x + player.vel.x * dt * 2.5;
-            const stepForwardZ = player.pos.z + player.vel.z * dt * 2.5;
-
-            if (!checkSolidCollision(player.pos.x, stepY, player.pos.z) &&
-                !checkSolidCollision(stepForwardX, stepY, stepForwardZ)) {
-                player.vel.y = 8.2;
-                player.onGround = false;
+            // Раньше на любую ступеньку игрок ПОДПРЫГИВАЛ (vel.y = 8.2): на
+            // тропинках и грядках камера постоянно подлетала и падала — мир
+            // «дрожал» при ходьбе. Теперь это плавный шаг вверх, как в MC.
+            const fwdX = player.pos.x + player.vel.x * dt * 2.5;
+            const fwdZ = player.pos.z + player.vel.z * dt * 2.5;
+            for (let lift = 0.25; lift <= 1.05; lift += 0.15) {
+                const ty = player.pos.y + lift;
+                if (checkSolidCollision(player.pos.x, ty, player.pos.z)) continue;
+                if (checkSolidCollision(fwdX, ty, fwdZ)) continue;
+                player.pos.y = ty;
+                player.vel.y = 0;
+                player.onGround = true;
+                player.highestFallY = player.pos.y;
+                movePlayerAxis('x', player.vel.x * dt);
+                movePlayerAxis('z', player.vel.z * dt);
+                break;
             }
         }
 
@@ -9686,7 +9706,12 @@
         }
         rescueFallenPlayer();
 
-        camera.position.set(player.pos.x, player.pos.y + player.eyeHeight, player.pos.z);
+        // Камера догоняет игрока по высоте за пару кадров: шаги на ступеньки
+        // и мелкие рывки физики больше не передаются в картинку.
+        const targetEyeY = player.pos.y + player.eyeHeight;
+        if (camEyeY === null || Math.abs(targetEyeY - camEyeY) > 2.5 || player.isDead) camEyeY = targetEyeY;
+        else camEyeY += (targetEyeY - camEyeY) * Math.min(1, dt * 16);
+        camera.position.set(player.pos.x, camEyeY, player.pos.z);
         const euler = new THREE.Euler(0, 0, 0, 'YXZ');
         euler.x = player.pitch;
         euler.y = player.yaw;
@@ -11843,6 +11868,8 @@
     let lastTime = performance.now();
     let frameCount = 0, fpsTimer = 0;
     let speechAcc = 0, socialAcc = 0, torchAcc = 0, chunkAcc = 999;
+    let dtSmooth = 0;
+    let lowFpsStreak = 0, highFpsStreak = 0;
     let highlightTick = 99;
     let lastChunkCX = null, lastChunkCZ = null;
     const statsEl = document.getElementById('stats').firstElementChild;
@@ -11855,8 +11882,13 @@
         requestAnimationFrame(animate);
         if (!worldReady) fitRenderer();
 
-        const dt = Math.min((currentTime - lastTime) / 1000, 0.05);
+        const dtRaw = Math.min((currentTime - lastTime) / 1000, 0.05);
         lastTime = currentTime;
+        // Кадры на телефоне приходят неровно (16/33/16 мс). Если двигать мир
+        // строго по такому шагу, картинка «дрожит». Сглаживаем шаг времени.
+        if (dtSmooth <= 0) dtSmooth = dtRaw;
+        dtSmooth += (dtRaw - dtSmooth) * 0.2;
+        const dt = Math.max(0.004, Math.min(0.05, dtSmooth));
 
         StarShader.uniforms.uTime.value = currentTime * 0.001;
 
@@ -11915,18 +11947,26 @@
                     cloudsMesh.visible = true;
                 }
                 PERF.adaptiveCooldown = Math.max(0, PERF.adaptiveCooldown - 1);
-                if (frameCount < 25 && PERF.pixelRatio > PERF.minPixelRatio && PERF.adaptiveCooldown <= 0) {
-                    PERF.pixelRatio = Math.max(PERF.minPixelRatio, PERF.pixelRatio - 0.06);
-                    renderer.setPixelRatio(PERF.pixelRatio);
-                    const s = viewSize();
-                    renderer.setSize(s.w, s.h, false);
-                    PERF.adaptiveCooldown = 4;
-                } else if (frameCount > 40 && PERF.pixelRatio < PERF.maxPixelRatio && PERF.adaptiveCooldown <= 0) {
-                    PERF.pixelRatio = Math.min(PERF.maxPixelRatio, PERF.pixelRatio + 0.05);
+                // Гистерезис: меняем разрешение, только если FPS держится вне
+                // «спокойной зоны» две секунды подряд. Иначе буфер кадра
+                // пересоздавался каждую секунду и картинка заметно дёргалась.
+                if (frameCount < 26) { lowFpsStreak++; highFpsStreak = 0; }
+                else if (frameCount > 52) { highFpsStreak++; lowFpsStreak = 0; }
+                else { lowFpsStreak = 0; highFpsStreak = 0; }
+                if (lowFpsStreak >= 2 && PERF.pixelRatio > PERF.minPixelRatio && PERF.adaptiveCooldown <= 0) {
+                    PERF.pixelRatio = Math.max(PERF.minPixelRatio, PERF.pixelRatio - 0.1);
                     renderer.setPixelRatio(PERF.pixelRatio);
                     const s = viewSize();
                     renderer.setSize(s.w, s.h, false);
                     PERF.adaptiveCooldown = 5;
+                    lowFpsStreak = 0;
+                } else if (highFpsStreak >= 3 && PERF.pixelRatio < PERF.maxPixelRatio && PERF.adaptiveCooldown <= 0) {
+                    PERF.pixelRatio = Math.min(PERF.maxPixelRatio, PERF.pixelRatio + 0.1);
+                    renderer.setPixelRatio(PERF.pixelRatio);
+                    const s = viewSize();
+                    renderer.setSize(s.w, s.h, false);
+                    PERF.adaptiveCooldown = 6;
+                    highFpsStreak = 0;
                 }
             }
             frameCount = 0;

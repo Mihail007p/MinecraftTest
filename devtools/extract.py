@@ -10,7 +10,7 @@ game = blocks[2].replace("updateMobsManager(dt);", "/* mobs off in harness */", 
 game += """
 ;globalThis.__DBG = { chunks, rebuildChunkMesh, getBlock, setBlock, biomeAt, ICON_CANVAS, droppedItems,
  spawnBlockDrop, player, scene, THREE, CHUNK_SIZE, CHUNK_HEIGHT, WATER_LEVEL, updateDroppedItems, isOpaque,
- getBlockFaceTile, getTileUV, atlasTexture, PERF, terrainMaterial, camera, MC_TEX, generateChunkTerrain };
+ getBlockFaceTile, getTileUV, atlasTexture, PERF, terrainMaterial, camera, MC_TEX, generateChunkTerrain, moveInput, updatePhysics };
 """
 open(os.path.join(here, 'game.js'), 'w', encoding='utf-8').write(game)
 print('extracted', len(blocks), 'scripts')

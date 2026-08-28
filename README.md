@@ -99,5 +99,12 @@ node devtools/render.js 22 6 200 -8 720   # программный скринш�
 node devtools/dump_tiles.js     # лист всех текстур -> _tiles_preview.png
 ```
 
+### Стенд умеет мерить «дрожание»
+
+```bash
+node devtools/walk.js   # симулирует ходьбу с неровными кадрами и меряет
+                        # рывки камеры (вторая производная высоты)
+```
+
 ![Карта мира](docs/worldmap.png)
 ![Вид в игре](docs/world.png)
