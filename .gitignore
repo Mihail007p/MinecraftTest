@@ -1,0 +1,6 @@
+# временные артефакты стенда
+_view*.png
+_worldmap.png
+_tiles_preview.png
+devtools/three.js
+devtools/game.js

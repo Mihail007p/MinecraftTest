@@ -4291,16 +4291,24 @@
     // Дальняя плоскость 120 вместо 180: мир всё равно уходит в туман на 88,
     // а короткий диапазон глубины точнее и дешевле для мобильного GPU.
     const camera = new THREE.PerspectiveCamera(75, _vs0.w / _vs0.h, 0.1, 120);
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.82);
     scene.add(ambientLight);
     
-    const celestialLight = new THREE.DirectionalLight(0xfffae0, 0.65);
+    const celestialLight = new THREE.DirectionalLight(0xfffae0, 0.5);
     scene.add(celestialLight);
 
     const atlasTexture = createTextureAtlas();
     const terrainMaterial = new THREE.MeshLambertMaterial({
         map: atlasTexture,
         transparent: false
+    });
+    // Материал ландшафта с запечённой яркостью граней: верх светлее, бока
+    // темнее, низ самый тёмный. Именно это придаёт блокам объём — без него
+    // мир выглядит плоской аппликацией.
+    const chunkMaterial = new THREE.MeshLambertMaterial({
+        map: atlasTexture,
+        transparent: false,
+        vertexColors: true
     });
 
     // Классическая прозрачная вода без бликов — дно и блоки видны сквозь поверхность
@@ -7025,15 +7033,22 @@
             biome: LAND_BIOMES[h % LAND_BIOMES.length]
         };
     }
+    // Шум береговой линии: без него остров — идеальный круг с ровным кольцом
+    // песка, что сразу выдаёт «сгенерировано формулой».
+    function coastNoise(wx, wz) {
+        return perlin2D(wx * 0.018 + 11.3, wz * 0.018 - 7.1) * 13.0
+             + perlin2D(wx * 0.055 - 3.7, wz * 0.055 + 5.9) * 4.5;
+    }
     function nearestIsland(wx, wz) {
         const gx = Math.round(wx / ISLAND_SPACING);
         const gz = Math.round(wz / ISLAND_SPACING);
+        const wobble = coastNoise(wx, wz);
         let best = null, bestD = 1e15;
         for (let dx = -1; dx <= 1; dx++) {
             for (let dz = -1; dz <= 1; dz++) {
                 const p = islandParams(gx + dx, gz + dz);
                 if (!p.exists) continue;
-                const d = Math.hypot(wx - p.cx, wz - p.cz);
+                const d = Math.hypot(wx - p.cx, wz - p.cz) + wobble;
                 if (d < bestD) { bestD = d; best = p; best.d = d; }
             }
         }
@@ -8617,6 +8632,21 @@
             else z += sz;
         }
     }
+    // Вес выравнивания площадки деревни: скруглённый прямоугольник + шум по краю
+    // и плавное затухание, чтобы площадка врастала в рельеф, а не стояла коробкой.
+    function villageFlatWeight(wx, wz, minX, maxX, minZ, maxZ, margin) {
+        const dx = Math.max(minX - wx, wx - maxX, 0);
+        const dz = Math.max(minZ - wz, wz - maxZ, 0);
+        let d = Math.sqrt(dx * dx + dz * dz);
+        if (d > 0) {
+            d += perlin2D(wx * 0.055, wz * 0.055) * 5.0;
+            d += ((pseudoHash2D(wx, wz) % 100) / 100 - 0.5) * 2.0;
+        }
+        if (d <= 0) return 1;
+        if (d >= margin) return 0;
+        const t = 1 - d / margin;
+        return t * t * (3 - 2 * t);
+    }
     function paintSpawnVillage(chunk) {
         const minX = chunk.cx * CHUNK_SIZE, maxX = minX + CHUNK_SIZE;
         const minZ = chunk.cz * CHUNK_SIZE, maxZ = minZ + CHUNK_SIZE;
@@ -8630,18 +8660,36 @@
         const fromZ = Math.max(outerMinZ, minZ), toZ = Math.min(outerMaxZ, maxZ - 1);
         for (let wx = fromX; wx <= toX; wx++) {
             for (let wz = fromZ; wz <= toZ; wz++) {
-                const outside = Math.max(coreMinX - wx, wx - coreMaxX, coreMinZ - wz, wz - coreMaxZ, 0);
-                const drop = Math.min(12, Math.floor((outside + 1) / 2.6));
-                const topY = y - drop;
-                const topBlock = topY <= WATER_LEVEL + 1 ? BLOCK_SAND : BLOCK_GRASS;
-                const fillBlock = topY <= WATER_LEVEL + 1 ? BLOCK_SAND : BLOCK_DIRT;
-                for (let yy = WATER_LEVEL - 6; yy < topY; yy++) chunkPut(chunk, wx, yy, wz, fillBlock);
+                // Насколько сильно эта колонка «принадлежит» деревне: 1 — ровная
+                // площадка, 0 — нетронутый рельеф. Раньше здесь была ступенчатая
+                // прямоугольная терраса: мир выглядел как гигантская коробка с
+                // квадратным рвом по краю. Теперь край скруглён, размыт шумом и
+                // плавно сливается с холмами.
+                const w = villageFlatWeight(wx, wz, coreMinX, coreMaxX, coreMinZ, coreMaxZ, slopeMargin);
+                if (w <= 0.002) continue;
+                const lx = wx - chunk.cx * CHUNK_SIZE, lz = wz - chunk.cz * CHUNK_SIZE;
+                if (lx < 0 || lx >= CHUNK_SIZE || lz < 0 || lz >= CHUNK_SIZE) continue;
+                // естественная высота колонки (что нагенерировал рельеф)
+                let nat = 1;
+                for (let yy = CHUNK_HEIGHT - 1; yy > 0; yy--) {
+                    const b = chunk.getBlock(lx, yy, lz);
+                    if (b !== BLOCK_EMPTY && b !== BLOCK_WATER) { nat = yy; break; }
+                }
+                const topY = Math.max(1, Math.min(CHUNK_HEIGHT - 12, Math.round(nat + (y - nat) * w)));
+                const underWater = topY <= WATER_LEVEL;
+                const topBlock = underWater ? BLOCK_SAND : BLOCK_GRASS;
+                const fillBlock = underWater ? BLOCK_SAND : BLOCK_DIRT;
+                // подсыпаем только там, где реально поднимаем землю
+                for (let yy = Math.max(1, Math.min(nat, topY) - 3); yy < topY; yy++) {
+                    const cur = chunk.getBlock(lx, yy, lz);
+                    if (cur === BLOCK_EMPTY || cur === BLOCK_WATER) chunkPut(chunk, wx, yy, wz, fillBlock);
+                }
                 chunkPut(chunk, wx, topY, wz, topBlock);
                 if (topY < WATER_LEVEL) {
                     for (let yy = topY + 1; yy <= WATER_LEVEL; yy++) chunkPut(chunk, wx, yy, wz, BLOCK_WATER);
-                    villageAir(chunk, wx, WATER_LEVEL + 1, y + 8, wz);
+                    villageAir(chunk, wx, WATER_LEVEL + 1, Math.max(nat, y) + 8, wz);
                 } else {
-                    villageAir(chunk, wx, topY + 1, y + 8, wz);
+                    villageAir(chunk, wx, topY + 1, Math.max(nat, y) + 8, wz);
                 }
             }
         }
@@ -8705,7 +8753,9 @@
                 h = Math.max(2, Math.min(CHUNK_HEIGHT - 10, h));
                 heights[lx + lz * CHUNK_SIZE] = h;
 
-                const shore = h <= WATER_LEVEL + 1;
+                // граница пляжа тоже с шумом, иначе песок ложится ровной каймой
+                const shoreEdge = WATER_LEVEL + 1 + perlin2D(wx * 0.09 + 21.7, wz * 0.09 - 13.2) * 1.8;
+                const shore = h <= shoreEdge;
                 let top = BLOCK_GRASS, fill = BLOCK_DIRT;
                 if (bio === 'desert' || shore) { top = BLOCK_SAND; fill = BLOCK_SAND; }
                 else if (bio === 'snow' && !shore) { top = BLOCK_SNOW; fill = BLOCK_DIRT; }
@@ -8750,9 +8800,9 @@
                 const canTree = lx >= margin && lx <= CHUNK_SIZE - 1 - margin && lz >= margin && lz <= CHUNK_SIZE - 1 - margin && h > WATER_LEVEL + 1;
                 let treeChance = 0;
                 if (bio === 'jungle') treeChance = 90;
-                else if (bio === 'forest') treeChance = 48;
-                else if (bio === 'taiga') treeChance = 42;
-                else if (bio === 'plains') treeChance = 12;
+                else if (bio === 'forest') treeChance = 62;
+                else if (bio === 'taiga') treeChance = 52;
+                else if (bio === 'plains') treeChance = 22;
                 else if (bio === 'snow') treeChance = 10;
                 else if (bio === 'swamp') treeChance = 8;
                 else if (bio === 'savanna') treeChance = 16;
@@ -8910,6 +8960,23 @@
         { dir: [0, 0, 1], norm: [0, 0, 1], corners: [[1, 0, 1], [1, 1, 1], [0, 1, 1], [0, 0, 1]] },
         { dir: [0, 0, -1], norm: [0, 0, -1], corners: [[0, 0, 0], [0, 1, 0], [1, 1, 0], [1, 0, 0]] }
     ];
+
+    // Яркость грани по её нормали: верх 1.0, бока 0.86/0.74, низ 0.6.
+    function faceShadeFromNormals(norm) {
+        const n = norm.length / 3;
+        const col = new Uint8Array(n * 3);
+        for (let i = 0; i < n; i++) {
+            const ny = norm[i * 3 + 1], nx = norm[i * 3], nz = norm[i * 3 + 2];
+            let v;
+            if (ny > 0.5) v = 255;
+            else if (ny < -0.5) v = 153;
+            else if (nx > 0.5 || nx < -0.5) v = 219;
+            else if (nz > 0.5 || nz < -0.5) v = 189;
+            else v = 230;
+            col[i * 3] = v; col[i * 3 + 1] = v; col[i * 3 + 2] = v;
+        }
+        return col;
+    }
 
     function rebuildChunkMesh(chunk) {
         const solidPos = [], solidNorm = [], solidUV = [], solidIdx = [];
@@ -9081,8 +9148,9 @@
             solidGeo.setAttribute('position', new THREE.Float32BufferAttribute(solidPos, 3));
             solidGeo.setAttribute('normal', new THREE.Float32BufferAttribute(solidNorm, 3));
             solidGeo.setAttribute('uv', new THREE.Float32BufferAttribute(solidUV, 2));
+            solidGeo.setAttribute('color', new THREE.Uint8BufferAttribute(faceShadeFromNormals(solidNorm), 3, true));
             solidGeo.setIndex(solidIdx);
-            chunk.solidMesh = new THREE.Mesh(solidGeo, terrainMaterial);
+            chunk.solidMesh = new THREE.Mesh(solidGeo, chunkMaterial);
             scene.add(chunk.solidMesh);
         }
 

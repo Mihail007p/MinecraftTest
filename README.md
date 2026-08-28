@@ -70,3 +70,21 @@ python3 -m http.server 8080
 Все текстуры генерируются кодом при запуске (32x32 на блок), атлас собирается
 в canvas 256x1024 с полями вокруг каждого тайла — поля нужны для мип-уровней,
 иначе вдали тайлы размазываются друг в друга.
+
+## Как проверялся мир
+
+В `devtools/` лежит headless-стенд: движок запускается в Node без браузера,
+что позволяет мерить генерацию, рисовать карту мира и делать программные
+скриншоты без телефона.
+
+```bash
+python3 devtools/extract.py     # вытащить three.js и код игры из index.html
+node devtools/check.js          # тайминги, число вершин, ошибки кадров
+node devtools/surface.js 60     # из чего состоит поверхность вокруг спавна
+node devtools/map.js 200        # карта мира сверху -> _worldmap.png
+node devtools/render.js 22 6 200 -8 720   # программный скриншот -> _view.png
+node devtools/dump_tiles.js     # лист всех текстур -> _tiles_preview.png
+```
+
+![Карта мира](docs/worldmap.png)
+![Вид в игре](docs/world.png)
