@@ -1,0 +1,6 @@
+# Артефакты тестов
+tests/node_modules/
+tests/report/
+tests/shots/
+tests/shots-*/
+*.log
